@@ -87,9 +87,15 @@ class AIService {
     async checkHealth() {
         try {
             const response = await axios.get(`${this.baseUrl}/api/health`, { timeout: 5000 });
-            return response.data;
+            const data = response.data;
+            return {
+                status: data?.server?.status === 'running' ? 'connected' : 'offline',
+                server: data.server || {},
+                ai: data.ai || {},
+                mernConnected: data.mern_server?.connected || false,
+            };
         } catch (error) {
-            return { status: 'offline', error: error.message };
+            return { status: 'offline', server: {}, ai: {}, mernConnected: false };
         }
     }
 }
