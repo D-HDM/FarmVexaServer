@@ -12,5 +12,6 @@ router.use('/models', require('./modelRoutes'));
 router.use('/public', require('./publicRoutes'));
 router.use('/payment-methods', require('./paymentMethodsRoutes'));
 router.use('/payment-models', require('./paymentModelsRoutes'));
+router.use('/weather-test', require('./weatherTestRoutes'));
 
 module.exports = router;
