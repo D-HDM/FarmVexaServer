@@ -4,7 +4,7 @@ const productionRecordSchema = new mongoose.Schema({
     farm: { type: mongoose.Schema.Types.ObjectId, ref: 'Farm', required: true },
     animal: { type: mongoose.Schema.Types.ObjectId, ref: 'Animal' },
     field: { type: mongoose.Schema.Types.ObjectId, ref: 'Field' },
-    type: { type: String, enum: ['milk', 'eggs', 'meat', 'harvest', 'breeding', 'other'], required: true },
+    type: { type: String, required: true, trim: true },
     date: { type: Date, required: true },
     quantity: { type: Number, required: true },
     unit: { type: String, trim: true },
