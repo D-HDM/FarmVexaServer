@@ -1,0 +1,54 @@
+{
+  "name": "farmvexa-server",
+  "version": "1.0.0",
+  "description": "FarmVexa - AI-Powered Farm Intelligence Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "admin": "node scripts/admin.js"
+  },
+  "keywords": [
+    "farm",
+    "agriculture",
+    "iot",
+    "ai",
+    "smart-farming",
+    "crop-monitoring",
+    "farm-intelligence"
+  ],
+  "author": {
+    "name": "Davis Okoth",
+    "email": "davismcintyre5@gmail.com",
+    "url": "https://hdmdevelopers.pxxl.click"
+  },
+  "license": "ISC",
+  "homepage": "https://farmvexa.pxxl.click",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davismcintyre/farmvexa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davismcintyre/farmvexa/issues",
+    "email": "davismcintyre5@gmail.com"
+  },
+  "company": "HDM",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "express-rate-limit": "^7.3.0",
+    "ioredis": "^5.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.0",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
