@@ -5,6 +5,7 @@ const Inventory = require('../models/farm/Inventory');
 const Equipment = require('../models/farm/Equipment');
 const Task = require('../models/farm/Task');
 const Stock = require('../models/farm/Stock');
+const BriefingLog = require('../models/admin/BriefingLog');
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
 const Settings = require('../models/admin/Settings');
@@ -18,15 +19,24 @@ const start = () => {
 
         try {
             const farms = await Farm.find({ status: 'active' }).populate('owner', 'name email phone');
-            logger.info(`[Reminder] Processing ${farms.length} farms`);
-
             const today = new Date(); today.setHours(0, 0, 0, 0);
             const threeDays = new Date(today); threeDays.setDate(threeDays.getDate() + 3);
+
+            logger.info(`[Reminder] Processing ${farms.length} farms`);
 
             for (const farm of farms) {
                 try {
                     const farmer = farm.owner;
                     if (!farmer?.email) continue;
+
+                    // Deduplication check
+                    const reminderSent = await BriefingLog.findOne({
+                        farm: farm._id, type: 'reminder', sentAt: { $gte: today },
+                    });
+                    if (reminderSent) {
+                        logger.info(`[Reminder] Already sent for ${farm.name} today, skipping`);
+                        continue;
+                    }
 
                     const upcoming = [];
                     const finalReminders = [];
@@ -79,11 +89,13 @@ const start = () => {
                     }
 
                     const settings = await Settings.findOne();
+                    let sentAny = false;
 
                     if (upcoming.length > 0 && settings?.emailToggles?.farmerReminderUpcoming) {
                         await emailService.send(farmer.email, 'farmerReminderUpcoming', {
                             user: farmer, farmName: farm.name, reminders: upcoming, count: upcoming.length,
                         });
+                        sentAny = true;
                         logger.info(`[Reminder] Upcoming sent to ${farm.name} (${upcoming.length})`);
                     }
 
@@ -92,6 +104,7 @@ const start = () => {
                             await emailService.send(farmer.email, 'farmerReminderFinal', {
                                 user: farmer, farmName: farm.name, reminders: finalReminders, count: finalReminders.length,
                             });
+                            sentAny = true;
                         }
                         if (farmer.phone && settings?.smsToggles?.farmerAlertHigh) {
                             await smsService.send(farmer.phone, 'farmerAlertHigh', {
@@ -99,6 +112,10 @@ const start = () => {
                             }).catch(() => {});
                         }
                         logger.info(`[Reminder] Final sent to ${farm.name} (${finalReminders.length})`);
+                    }
+
+                    if (sentAny) {
+                        await BriefingLog.create({ farm: farm._id, type: 'reminder' });
                     }
                 } catch (err) {
                     logger.error(`[Reminder] Failed for ${farm.name}: ${err.message}`);

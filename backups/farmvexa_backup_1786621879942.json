@@ -1,0 +1,799 @@
+{
+  "metadata": {
+    "app": "FarmVexa",
+    "version": "1.0.0",
+    "createdAt": "2026-08-13T11:51:16.500Z",
+    "createdBy": "6a7c42293654879c9ddf5f21",
+    "collections": [
+      {
+        "name": "cropimages",
+        "count": 1
+      },
+      {
+        "name": "admins",
+        "count": 1
+      },
+      {
+        "name": "tasks",
+        "count": 0
+      },
+      {
+        "name": "animals",
+        "count": 0
+      },
+      {
+        "name": "settings",
+        "count": 1
+      },
+      {
+        "name": "paymentmodels",
+        "count": 0
+      },
+      {
+        "name": "users",
+        "count": 1
+      },
+      {
+        "name": "weathers",
+        "count": 3
+      },
+      {
+        "name": "transactions",
+        "count": 0
+      },
+      {
+        "name": "inventories",
+        "count": 0
+      },
+      {
+        "name": "stocks",
+        "count": 1
+      },
+      {
+        "name": "crops",
+        "count": 0
+      },
+      {
+        "name": "farmmanagements",
+        "count": 2
+      },
+      {
+        "name": "teammembers",
+        "count": 0
+      },
+      {
+        "name": "productprices",
+        "count": 3
+      },
+      {
+        "name": "alerts",
+        "count": 0
+      },
+      {
+        "name": "fields",
+        "count": 3
+      },
+      {
+        "name": "farms",
+        "count": 2
+      },
+      {
+        "name": "equipment",
+        "count": 0
+      },
+      {
+        "name": "productionrecords",
+        "count": 1
+      },
+      {
+        "name": "models",
+        "count": 0
+      },
+      {
+        "name": "paymentmethods",
+        "count": 0
+      },
+      {
+        "name": "sensorreadings",
+        "count": 0
+      },
+      {
+        "name": "devices",
+        "count": 0
+      },
+      {
+        "name": "pendingapprovals",
+        "count": 1
+      }
+    ]
+  },
+  "data": {
+    "cropimages": [
+      {
+        "_id": "6a7c52e5f2f0651df07b56e2",
+        "field": "6a7c4f1c02f47d2cb3b043c0",
+        "cropType": "tomato",
+        "imageUrl": "https://res.cloudinary.com/dfrrvnsri/image/upload/v1786532580/farmvexa/6a7c4f1c02f47d2cb3b043c0/a3rl0eqcijkzn2xpo4vr.jpg",
+        "storageType": "cloudinary",
+        "cloudinaryId": "farmvexa/6a7c4f1c02f47d2cb3b043c0/a3rl0eqcijkzn2xpo4vr",
+        "status": "completed",
+        "createdAt": "2026-08-12T11:03:01.574Z",
+        "updatedAt": "2026-08-12T11:03:07.333Z",
+        "__v": 0,
+        "aiUsed": "gemini",
+        "analysisTimestamp": "2026-08-12T11:03:07.331Z",
+        "confidence": 95,
+        "diseaseDetected": "Powdery Mildew",
+        "healthScore": null,
+        "recommendation": "Apply sulfur-based fungicides, potassium bicarbonate, or neem oil. Improve plant spacing to increase air circulation and reduce humidity around the canopy.",
+        "severity": "moderate",
+        "symptoms": "Distinct white, powdery fungal patches covering the upper surface of the tomato leaf, leading to slight chlorosis."
+      }
+    ],
+    "admins": [
+      {
+        "_id": "6a7c42293654879c9ddf5f21",
+        "name": "Davix HDM",
+        "email": "davismcintyre5@gmail.com",
+        "password": "$2a$12$KitX.Xu.dTx.l2kw/cYpzuuKLQ8pewQ9orJOh/yDBabcE2ocI0DJG",
+        "role": "super_admin",
+        "phone": "0768784909",
+        "isActive": true,
+        "createdAt": "2026-08-12T09:51:37.969Z",
+        "updatedAt": "2026-08-12T12:46:30.034Z",
+        "__v": 0,
+        "lastLogin": "2026-08-12T12:46:30.033Z"
+      }
+    ],
+    "tasks": [],
+    "animals": [],
+    "settings": [
+      {
+        "_id": "6a7c4c20185f429d2685861b",
+        "gemini": {
+          "dailyLimitPerUser": 50,
+          "dailyLimitTotal": 5000
+        },
+        "ai": {
+          "aiUsed": "gemini",
+          "pythonAiUrl": "https://farmvexa-api.onrender.com",
+          "confidenceThreshold": 0.75
+        },
+        "alerts": {
+          "soilMoistureLow": 20,
+          "soilMoistureHigh": 80,
+          "temperatureHigh": 35,
+          "temperatureLow": 5,
+          "humidityHigh": 85,
+          "diseaseRiskHumidity": 75,
+          "diseaseRiskTemperature": 28,
+          "alertFrequency": 30
+        },
+        "system": {
+          "appName": "FarmVexa",
+          "supportPhone": "+254768784909",
+          "supportEmail": "support@farmvexa.com",
+          "whatsappNumber": "+254768784909",
+          "showWhatsapp": false,
+          "dataRetentionDays": 90,
+          "autoBackup": false,
+          "timezone": "Africa/Nairobi",
+          "language": "en",
+          "allowSelfRegistration": false,
+          "downloads": [
+            {
+              "name": "FarmVexa For Windows",
+              "version": "1.0.1",
+              "link": "https://github.com/Davismcintyre5/FarmVexa/releases/download/v1.0.1/FarmVexa-Setup-1.0.1.exe",
+              "description": "Download our windows Application",
+              "platform": "windows",
+              "enabled": true,
+              "_id": "6a7c63fdf2f0651df07b5bba"
+            }
+          ],
+          "chatbot": {
+            "enabled": true,
+            "name": "FarmVexa AI",
+            "greeting": "Hello! How can I help you with your farm today?",
+            "position": "bottom-right",
+            "primaryColor": "#2d6a4f",
+            "aiProvider": "gemini",
+            "geminiApiKey": "AIzaSyC3xHPpCGAxbFdqzsA9w1CWmRPWFjykyeA",
+            "hdmApiKey": "hdm_gen_672c508041be8b20ffcf20ac80ab00a3327e40195ca6f4d7",
+            "hdmBaseUrl": "https://hdmaiserver.pxxl.click/api/v1/projects/general/public-chat",
+            "_id": "6a7c7f686ade7e3e96cbc567"
+          },
+          "legal": {
+            "termsOfService": "By using FarmVexa, you agree to these terms. FarmVexa is an AI-powered farm intelligence platform. Users must provide accurate information. FarmVexa reserves the right to suspend accounts that violate terms.",
+            "privacyPolicy": "FarmVexa collects farm data to provide AI insights. Your data is private and never shared with third parties. We use industry-standard encryption. You can request data deletion at any time.",
+            "cookiePolicy": "FarmVexa uses essential cookies for authentication and preferences. We use analytics cookies to improve our service. You can disable cookies in browser settings. By continuing, you consent to our use of cookies.",
+            "_id": "6a7c7f476ade7e3e96cbc55f"
+          },
+          "weatherTest": {
+            "enabled": false,
+            "location": "Nairobi",
+            "results": [],
+            "_id": "6a7c7f476ade7e3e96cbc55c"
+          }
+        },
+        "email": {
+          "host": "",
+          "port": 587,
+          "secure": false,
+          "user": "",
+          "password": "",
+          "fromEmail": "notifications@farmvexa.com",
+          "fromName": "FarmVexa",
+          "enabled": true,
+          "_id": "6a7c4c20185f429d2685861c"
+        },
+        "sms": {
+          "provider": "brevo",
+          "apiKey": "",
+          "senderId": "FarmVexa",
+          "enabled": false,
+          "_id": "6a7c4c20185f429d2685861d"
+        },
+        "emailToggles": {
+          "farmerRegistrationPending": true,
+          "farmerApproved": true,
+          "farmerRejected": true,
+          "farmerWelcome": true,
+          "farmerEmailVerify": true,
+          "farmerPasswordReset": true,
+          "farmerAlertHigh": true,
+          "farmerAlertMedium": true,
+          "farmerDiseaseDetected": true,
+          "farmerDeviceOffline": true,
+          "farmerDailyReport": true,
+          "farmerWeeklyReport": true,
+          "farmerNewDeviceLogin": true,
+          "farmerVaccinationDue": true,
+          "farmerLivestockAlert": true,
+          "farmerLowStock": true,
+          "farmerMaintenanceDue": true,
+          "farmerWeatherAlert": true,
+          "farmerTaskOverdue": true,
+          "farmerReminderUpcoming": true,
+          "farmerReminderFinal": true,
+          "teamMemberAdded": true,
+          "adminNewFarmer": true,
+          "adminSystemCritical": true,
+          "adminGeminiEightyPercent": true,
+          "adminGeminiExceeded": true,
+          "adminPythonOffline": true,
+          "adminDeviceOffline24h": true,
+          "adminTrainingComplete": true,
+          "adminNewAdmin": true,
+          "adminWeeklyReport": true,
+          "_id": "6a7c4c20185f429d2685861e"
+        },
+        "smsToggles": {
+          "farmerApproved": true,
+          "farmerWelcome": true,
+          "farmerAlertHigh": true,
+          "farmerDiseaseDetected": true,
+          "farmerDeviceOffline": true,
+          "farmerVaccinationDue": true,
+          "farmerLivestockAlert": true,
+          "farmerLowStock": true,
+          "farmerWeatherAlert": true,
+          "teamMemberAdded": true,
+          "adminNewFarmer": true,
+          "adminSystemCritical": true,
+          "adminGeminiExceeded": true,
+          "adminPythonOffline": true,
+          "_id": "6a7c4c20185f429d2685861f"
+        },
+        "createdAt": "2026-08-12T10:34:08.235Z",
+        "updatedAt": "2026-08-12T17:32:47.153Z",
+        "__v": 15,
+        "updatedBy": "6a7c42293654879c9ddf5f21"
+      }
+    ],
+    "paymentmodels": [],
+    "users": [
+      {
+        "_id": "6a7c4c46185f429d26858623",
+        "name": "Davix HDM",
+        "email": "davismcintyre5@gmail.com",
+        "password": "$2a$12$tF1CkAxIGfl8QZnhsyPEfOsW5VfjiW.qovN3zkaHf3UF7/ehlxSwW",
+        "phone": "+254768784909",
+        "county": "Nakuru",
+        "subCounty": "Rongai",
+        "role": "farmer",
+        "isActive": true,
+        "approvalStatus": "approved",
+        "createdAt": "2026-08-12T10:34:46.713Z",
+        "updatedAt": "2026-08-12T17:26:15.253Z",
+        "__v": 0,
+        "approvedAt": "2026-08-12T10:36:10.214Z",
+        "approvedBy": "6a7c42293654879c9ddf5f21",
+        "lastLogin": "2026-08-12T17:26:15.252Z"
+      }
+    ],
+    "weathers": [
+      {
+        "_id": "6a7c4df2f67b5172d2e7c985",
+        "date": "2026-08-12T00:00:00.000Z",
+        "farm": "6a7c4cca185f429d26858668",
+        "__v": 0,
+        "alerts": [],
+        "condition": "cloudy",
+        "createdAt": "2026-08-12T10:41:54.522Z",
+        "forecast": [
+          {
+            "date": "2026-08-12T00:00:00.000Z",
+            "tempMin": 14.3,
+            "tempMax": 27.8,
+            "condition": "cloudy",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 15.1,
+            "_id": "6a7cad156ade7e3e96cbca0f"
+          },
+          {
+            "date": "2026-08-13T00:00:00.000Z",
+            "tempMin": 14,
+            "tempMax": 28.5,
+            "condition": "cloudy",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 22.5,
+            "_id": "6a7cad156ade7e3e96cbca10"
+          },
+          {
+            "date": "2026-08-14T00:00:00.000Z",
+            "tempMin": 14.1,
+            "tempMax": 28.6,
+            "condition": "cloudy",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 19.5,
+            "_id": "6a7cad156ade7e3e96cbca11"
+          },
+          {
+            "date": "2026-08-15T00:00:00.000Z",
+            "tempMin": 14.4,
+            "tempMax": 28.5,
+            "condition": "rainy",
+            "rainfall": 0.2,
+            "humidity": null,
+            "windSpeed": 13.8,
+            "_id": "6a7cad156ade7e3e96cbca12"
+          },
+          {
+            "date": "2026-08-16T00:00:00.000Z",
+            "tempMin": 15.5,
+            "tempMax": 28.4,
+            "condition": "rainy",
+            "rainfall": 3.3,
+            "humidity": null,
+            "windSpeed": 11.5,
+            "_id": "6a7cad156ade7e3e96cbca13"
+          },
+          {
+            "date": "2026-08-17T00:00:00.000Z",
+            "tempMin": 13.9,
+            "tempMax": 27.6,
+            "condition": "rainy",
+            "rainfall": 11.1,
+            "humidity": null,
+            "windSpeed": 9.3,
+            "_id": "6a7cad156ade7e3e96cbca14"
+          },
+          {
+            "date": "2026-08-18T00:00:00.000Z",
+            "tempMin": 13.5,
+            "tempMax": 27.4,
+            "condition": "rainy",
+            "rainfall": 1.8,
+            "humidity": null,
+            "windSpeed": 15.4,
+            "_id": "6a7cad156ade7e3e96cbca15"
+          }
+        ],
+        "humidity": 56,
+        "rainfall": 0,
+        "source": "api",
+        "temperature": {
+          "min": 13.5,
+          "max": 28.6,
+          "avg": 20.496666666666666
+        },
+        "updatedAt": "2026-08-12T17:27:49.769Z",
+        "windSpeed": 7.704000000000001
+      },
+      {
+        "_id": "6a7d64b9f67b5172d2e7d781",
+        "date": "2026-08-13T00:00:00.000Z",
+        "farm": "6a7c4cca185f429d26858668",
+        "__v": 0,
+        "alerts": [],
+        "condition": "cloudy",
+        "createdAt": "2026-08-13T06:31:21.483Z",
+        "forecast": [
+          {
+            "date": "2026-08-13T00:00:00.000Z",
+            "tempMin": 13.9,
+            "tempMax": 28.3,
+            "condition": "cloudy",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 23.3,
+            "_id": "6a7d67ec6ade7e3e96cbceab"
+          },
+          {
+            "date": "2026-08-14T00:00:00.000Z",
+            "tempMin": 14.5,
+            "tempMax": 28.7,
+            "condition": "rainy",
+            "rainfall": 0.3,
+            "humidity": null,
+            "windSpeed": 18.4,
+            "_id": "6a7d67ec6ade7e3e96cbceac"
+          },
+          {
+            "date": "2026-08-15T00:00:00.000Z",
+            "tempMin": 14.7,
+            "tempMax": 28.6,
+            "condition": "rainy",
+            "rainfall": 1.3,
+            "humidity": null,
+            "windSpeed": 12.9,
+            "_id": "6a7d67ec6ade7e3e96cbcead"
+          },
+          {
+            "date": "2026-08-16T00:00:00.000Z",
+            "tempMin": 15,
+            "tempMax": 27.9,
+            "condition": "rainy",
+            "rainfall": 1,
+            "humidity": null,
+            "windSpeed": 8.8,
+            "_id": "6a7d67ec6ade7e3e96cbceae"
+          },
+          {
+            "date": "2026-08-17T00:00:00.000Z",
+            "tempMin": 14.9,
+            "tempMax": 27.7,
+            "condition": "rainy",
+            "rainfall": 11.1,
+            "humidity": null,
+            "windSpeed": 9.3,
+            "_id": "6a7d67ec6ade7e3e96cbceaf"
+          },
+          {
+            "date": "2026-08-18T00:00:00.000Z",
+            "tempMin": 13.2,
+            "tempMax": 27,
+            "condition": "rainy",
+            "rainfall": 1.5,
+            "humidity": null,
+            "windSpeed": 13.5,
+            "_id": "6a7d67ec6ade7e3e96cbceb0"
+          },
+          {
+            "date": "2026-08-19T00:00:00.000Z",
+            "tempMin": 15.1,
+            "tempMax": 27.6,
+            "condition": "sunny",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 12.8,
+            "_id": "6a7d67ec6ade7e3e96cbceb1"
+          }
+        ],
+        "humidity": 41,
+        "rainfall": 0,
+        "source": "api",
+        "temperature": {
+          "min": 13.2,
+          "max": 28.7,
+          "avg": 22.180000000000003
+        },
+        "updatedAt": "2026-08-13T06:45:00.029Z",
+        "windSpeed": 7.668
+      },
+      {
+        "_id": "6a7d67dcf67b5172d2e7d7a3",
+        "date": "2026-08-13T00:00:00.000Z",
+        "farm": "6a7d67816ade7e3e96cbce58",
+        "__v": 0,
+        "alerts": [],
+        "condition": "cloudy",
+        "createdAt": "2026-08-13T06:44:44.316Z",
+        "forecast": [
+          {
+            "date": "2026-08-13T00:00:00.000Z",
+            "tempMin": 18.5,
+            "tempMax": 30.6,
+            "condition": "rainy",
+            "rainfall": 1.1,
+            "humidity": null,
+            "windSpeed": 12.2,
+            "_id": "6a7d67dc6ade7e3e96cbce91"
+          },
+          {
+            "date": "2026-08-14T00:00:00.000Z",
+            "tempMin": 18.9,
+            "tempMax": 31.1,
+            "condition": "cloudy",
+            "rainfall": 0,
+            "humidity": null,
+            "windSpeed": 18.2,
+            "_id": "6a7d67dc6ade7e3e96cbce92"
+          },
+          {
+            "date": "2026-08-15T00:00:00.000Z",
+            "tempMin": 19,
+            "tempMax": 32,
+            "condition": "rainy",
+            "rainfall": 0.3,
+            "humidity": null,
+            "windSpeed": 18.8,
+            "_id": "6a7d67dc6ade7e3e96cbce93"
+          },
+          {
+            "date": "2026-08-16T00:00:00.000Z",
+            "tempMin": 19.5,
+            "tempMax": 31.7,
+            "condition": "rainy",
+            "rainfall": 2.1,
+            "humidity": null,
+            "windSpeed": 17,
+            "_id": "6a7d67dc6ade7e3e96cbce94"
+          },
+          {
+            "date": "2026-08-17T00:00:00.000Z",
+            "tempMin": 18.3,
+            "tempMax": 27.4,
+            "condition": "rainy",
+            "rainfall": 5.4,
+            "humidity": null,
+            "windSpeed": 14.2,
+            "_id": "6a7d67dc6ade7e3e96cbce95"
+          },
+          {
+            "date": "2026-08-18T00:00:00.000Z",
+            "tempMin": 17.8,
+            "tempMax": 30.2,
+            "condition": "rainy",
+            "rainfall": 3.5,
+            "humidity": null,
+            "windSpeed": 11.3,
+            "_id": "6a7d67dc6ade7e3e96cbce96"
+          },
+          {
+            "date": "2026-08-19T00:00:00.000Z",
+            "tempMin": 18.8,
+            "tempMax": 29,
+            "condition": "rainy",
+            "rainfall": 5.4,
+            "humidity": null,
+            "windSpeed": 7.5,
+            "_id": "6a7d67dc6ade7e3e96cbce97"
+          }
+        ],
+        "humidity": 43,
+        "rainfall": 1.1,
+        "source": "api",
+        "temperature": {
+          "min": 17.8,
+          "max": 32,
+          "avg": 25.286666666666665
+        },
+        "updatedAt": "2026-08-13T06:44:44.316Z",
+        "windSpeed": 4.104
+      }
+    ],
+    "transactions": [],
+    "inventories": [],
+    "stocks": [
+      {
+        "_id": "6a7c5283f2f0651df07b569c",
+        "farm": "6a7c4cca185f429d26858668",
+        "product": "Tomato",
+        "unit": "kg",
+        "quantity": 50,
+        "minimumStock": 0,
+        "pricePerUnit": 50,
+        "movements": [
+          {
+            "type": "in",
+            "quantity": 50,
+            "date": "2026-08-12T12:00:00.000Z",
+            "reason": "Production",
+            "relatedModule": "production",
+            "relatedId": "6a7c5282f2f0651df07b5699",
+            "_id": "6a7c5283f2f0651df07b569d"
+          }
+        ],
+        "createdAt": "2026-08-12T11:01:23.105Z",
+        "updatedAt": "2026-08-12T11:01:23.105Z",
+        "__v": 0
+      }
+    ],
+    "crops": [],
+    "farmmanagements": [
+      {
+        "_id": "6a7c4cca185f429d2685866a",
+        "farm": "6a7c4cca185f429d26858668",
+        "status": "pending",
+        "subscriptionTier": "free",
+        "createdAt": "2026-08-12T10:36:58.821Z",
+        "updatedAt": "2026-08-12T10:36:58.821Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7d67816ade7e3e96cbce5a",
+        "farm": "6a7d67816ade7e3e96cbce58",
+        "status": "pending",
+        "subscriptionTier": "free",
+        "createdAt": "2026-08-13T06:43:13.989Z",
+        "updatedAt": "2026-08-13T06:43:13.989Z",
+        "__v": 0
+      }
+    ],
+    "teammembers": [],
+    "productprices": [
+      {
+        "_id": "6a7c4f2c02f47d2cb3b043e9",
+        "farm": "6a7c4cca185f429d26858668",
+        "product": "maize",
+        "category": "crop",
+        "unit": "kg",
+        "pricePerUnit": 50,
+        "quality": "grade_a",
+        "setBy": "6a7c4c46185f429d26858623",
+        "createdAt": "2026-08-12T10:47:08.649Z",
+        "updatedAt": "2026-08-12T10:47:31.648Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7c4f3202f47d2cb3b043f3",
+        "farm": "6a7c4cca185f429d26858668",
+        "product": "tomato",
+        "category": "crop",
+        "unit": "kg",
+        "pricePerUnit": 50,
+        "quality": "grade_a",
+        "setBy": "6a7c4c46185f429d26858623",
+        "createdAt": "2026-08-12T10:47:14.726Z",
+        "updatedAt": "2026-08-12T10:47:23.170Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7d67c26ade7e3e96cbce81",
+        "farm": "6a7d67816ade7e3e96cbce58",
+        "product": "kales",
+        "category": "crop",
+        "unit": "kg",
+        "pricePerUnit": 100,
+        "quality": "grade_a",
+        "setBy": "6a7c4c46185f429d26858623",
+        "createdAt": "2026-08-13T06:44:18.643Z",
+        "updatedAt": "2026-08-13T06:44:27.010Z",
+        "__v": 0
+      }
+    ],
+    "alerts": [],
+    "fields": [
+      {
+        "_id": "6a7c4ef502f47d2cb3b043b9",
+        "name": "Maize Plantation",
+        "farm": "6a7c4cca185f429d26858668",
+        "crop": "Maize",
+        "size": {
+          "value": 2,
+          "unit": "acres"
+        },
+        "soilType": "Loam",
+        "status": "active",
+        "createdAt": "2026-08-12T10:46:13.469Z",
+        "updatedAt": "2026-08-12T10:46:13.469Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7c4f1c02f47d2cb3b043c0",
+        "name": "Tomato Field",
+        "farm": "6a7c4cca185f429d26858668",
+        "crop": "Tomato",
+        "size": {
+          "value": 0.25,
+          "unit": "acres"
+        },
+        "soilType": "Loam",
+        "status": "active",
+        "createdAt": "2026-08-12T10:46:52.599Z",
+        "updatedAt": "2026-08-12T10:46:52.599Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7d67ae6ade7e3e96cbce69",
+        "name": "Kales Field",
+        "farm": "6a7d67816ade7e3e96cbce58",
+        "crop": "Kales",
+        "size": {
+          "value": 1,
+          "unit": "acres"
+        },
+        "soilType": "Volcanic",
+        "status": "active",
+        "createdAt": "2026-08-13T06:43:58.645Z",
+        "updatedAt": "2026-08-13T06:43:58.645Z",
+        "__v": 0
+      }
+    ],
+    "farms": [
+      {
+        "_id": "6a7c4cca185f429d26858668",
+        "name": "Green Farm",
+        "owner": "6a7c4c46185f429d26858623",
+        "location": {
+          "county": "Nakuru",
+          "subCounty": "Rongai"
+        },
+        "size": {
+          "value": 5,
+          "unit": "acres"
+        },
+        "status": "active",
+        "createdAt": "2026-08-12T10:36:58.662Z",
+        "updatedAt": "2026-08-12T10:36:58.662Z",
+        "__v": 0
+      },
+      {
+        "_id": "6a7d67816ade7e3e96cbce58",
+        "name": "Home field",
+        "owner": "6a7c4c46185f429d26858623",
+        "location": {
+          "county": "Siaya",
+          "subCounty": "Ugunja"
+        },
+        "size": {
+          "value": 5,
+          "unit": "acres"
+        },
+        "status": "active",
+        "createdAt": "2026-08-13T06:43:13.799Z",
+        "updatedAt": "2026-08-13T06:43:13.799Z",
+        "__v": 0
+      }
+    ],
+    "equipment": [],
+    "productionrecords": [
+      {
+        "_id": "6a7c5282f2f0651df07b5699",
+        "farm": "6a7c4cca185f429d26858668",
+        "field": "6a7c4f1c02f47d2cb3b043c0",
+        "type": "Tomato",
+        "date": "2026-08-12T12:00:00.000Z",
+        "quantity": 50,
+        "unit": "kg",
+        "quality": "grade_a",
+        "totalValue": 2500,
+        "createdAt": "2026-08-12T11:01:22.749Z",
+        "updatedAt": "2026-08-12T11:01:22.749Z",
+        "__v": 0
+      }
+    ],
+    "models": [],
+    "paymentmethods": [],
+    "sensorreadings": [],
+    "devices": [],
+    "pendingapprovals": [
+      {
+        "_id": "6a7c4c47185f429d26858625",
+        "user": "6a7c4c46185f429d26858623",
+        "status": "approved",
+        "createdAt": "2026-08-12T10:34:47.888Z",
+        "updatedAt": "2026-08-12T10:36:10.570Z",
+        "__v": 0,
+        "notes": "",
+        "reviewedAt": "2026-08-12T10:36:10.567Z",
+        "reviewedBy": "6a7c42293654879c9ddf5f21"
+      }
+    ]
+  }
+}

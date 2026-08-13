@@ -209,6 +209,43 @@ const teamMemberAdded = async (user, data, settings) => {
     return { subject: `Welcome to FarmVexa, ${user.name}!`, html: baseTemplate(`<h2>Welcome to the Team! 👋</h2><div class="alert-success"><strong>You've been added as ${data.role||'team member'}.</strong></div><div class="data-row"><span class="data-label">Farm:</span><span class="data-value">${data.farmName||'N/A'}</span></div><div class="data-row"><span class="data-label">Role:</span><span class="data-value">${data.role||'N/A'}</span></div><p style="margin-top:15px"><strong>Your Login Credentials:</strong></p><div class="data-row"><span class="data-label">Email:</span><span class="data-value">${data.email||user.email}</span></div><div class="data-row"><span class="data-label">Password:</span><span class="data-value">${data.password||'N/A'}</span></div><p style="font-size:13px;color:#e74c3c">Please change your password after first login.</p><a href="${process.env.CLIENT_URL}/login" class="button">Login to FarmVexa</a><p style="margin-top:15px;font-size:13px;color:#777">Need help? 📞 ${phone}</p>`, settings) };
 };
 
+const marketInquiryEmail = async (user, data, settings) => {
+    const phone = settings?.system?.supportPhone || '+254700000000';
+    return {
+        subject: `🛒 New Market Inquiry — ${data.productName || 'Your Product'}`,
+        html: baseTemplate(`
+            <h2>🛒 New Market Inquiry</h2>
+            <div class="alert-success">
+                <strong>Someone is interested in your product!</strong>
+            </div>
+            
+            <div style="background:#f0fdf4;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">📦 Product</h3>
+                <div class="data-row"><span class="data-label">Product:</span><span class="data-value">${data.productName || 'N/A'}</span></div>
+                <div class="data-row"><span class="data-label">Price:</span><span class="data-value">KES ${data.price || 0}/${data.unit || ''}</span></div>
+                <div class="data-row"><span class="data-label">Quantity:</span><span class="data-value">${data.quantity || 'N/A'} ${data.unit || ''}</span></div>
+            </div>
+
+            <div style="background:#eff6ff;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">👤 Buyer Details</h3>
+                <div class="data-row"><span class="data-label">Name:</span><span class="data-value">${data.buyerName || 'N/A'}</span></div>
+                ${data.buyerPhone ? `<div class="data-row"><span class="data-label">Phone:</span><span class="data-value">${data.buyerPhone}</span></div>` : ''}
+                ${data.buyerEmail ? `<div class="data-row"><span class="data-label">Email:</span><span class="data-value">${data.buyerEmail}</span></div>` : ''}
+            </div>
+
+            ${data.message ? `
+            <div style="background:#fefce8;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">💬 Message</h3>
+                <p style="margin:0;font-style:italic;">"${data.message}"</p>
+            </div>` : ''}
+
+            <p>Contact the buyer directly to close the sale. Respond quickly for best results!</p>
+            <a href="${process.env.CLIENT_URL}/dashboard" class="button">View In Dashboard</a>
+            <p style="margin-top:15px;font-size:13px;color:#777">Need help? 📞 ${phone}</p>
+        `, settings),
+    };
+};
+
 // ============ ADMIN ============
 
 const adminNewFarmer = async (user, data, settings) => ({
@@ -249,6 +286,6 @@ module.exports = {
     adminNewFarmer, adminSystemCritical, adminGeminiEightyPercent,
     adminGeminiExceeded, adminPythonOffline, adminDeviceOffline24h,
     adminTrainingComplete, adminNewAdmin, adminWeeklyReport,
-    farmerReminderUpcoming,farmerReminderFinal,
+    farmerReminderUpcoming,farmerReminderFinal,marketInquiryEmail,
 
 };

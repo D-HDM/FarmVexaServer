@@ -6,6 +6,7 @@ const deviceHealthScheduler = require('./deviceHealthScheduler');
 const dataCleanupScheduler = require('./dataCleanupScheduler');
 const dailyBriefingScheduler = require('./dailyBriefingScheduler');
 const reminderScheduler = require('./reminderScheduler');
+const backupScheduler = require('./backupScheduler');
 const logger = require('../utils/logger');
 
 const startSchedulers = () => {
@@ -17,6 +18,7 @@ const startSchedulers = () => {
     dataCleanupScheduler.start();
     dailyBriefingScheduler.start();
     reminderScheduler.start();
+    backupScheduler.start();
     logger.info('✅ All schedulers started');
 };
 
@@ -28,6 +30,7 @@ const stopSchedulers = () => {
     dataCleanupScheduler.stop();
     dailyBriefingScheduler.stop();
     reminderScheduler.stop();
+    backupScheduler.stop();
     logger.info('🛑 All schedulers stopped');
 };
 

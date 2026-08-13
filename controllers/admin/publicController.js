@@ -19,6 +19,7 @@ const getPublicSettings = asyncHandler(async (req, res) => {
         allowSelfRegistration: settings?.system?.allowSelfRegistration ?? true,
         downloads: settings?.system?.downloads?.filter((d) => d.enabled) || [],
         chatbot: settings?.system?.chatbot || { enabled: false },
+        allowExternalCamera: settings?.system?.allowExternalCamera ?? true,
         legal: settings?.system?.legal || { termsOfService: '', privacyPolicy: '', cookiePolicy: '' },
         paymentMethods: paymentMethods.map((m) => ({
             id: m._id,

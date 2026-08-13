@@ -35,6 +35,9 @@ const farmerWeatherAlert = async (user, data, settings) =>
 const teamMemberAdded = async (user, data, settings) =>
     `FarmVexa: You've been added as ${data.role} on ${data.farmName}. Login: ${process.env.CLIENT_URL}/login Email: ${data.email||user.email} Pass: ${data.password}`;
 
+const marketInquirySMS = async (user, data, settings) =>
+    `FarmVexa Market: New inquiry for ${data.productName} from ${data.buyerName}${data.buyerPhone ? ' (' + data.buyerPhone + ')' : ''}. ${data.message ? data.message.substring(0, 80) : ''}`;
+
 const adminNewFarmer = async (user, data, settings) =>
     `FARMVEXA: New farmer ${data.farmer?.name} (${data.farmer?.email}) pending. Review: ${process.env.ADMIN_URL}/approvals`;
 
@@ -50,6 +53,6 @@ const adminPythonOffline = async (user, data, settings) =>
 module.exports = {
     farmerApproved, farmerWelcome, farmerAlertHigh, farmerDiseaseDetected,
     farmerDeviceOffline, farmerVaccinationDue, farmerLivestockAlert,
-    farmerLowStock, farmerWeatherAlert, teamMemberAdded,
+    farmerLowStock, farmerWeatherAlert, teamMemberAdded,marketInquirySMS,
     adminNewFarmer, adminSystemCritical, adminGeminiExceeded, adminPythonOffline,
 };

@@ -6,6 +6,7 @@ const Animal = require('../models/farm/Animal');
 const Device = require('../models/farm/Device');
 const SensorReading = require('../models/farm/SensorReading');
 const Field = require('../models/farm/Field');
+const BriefingLog = require('../models/admin/BriefingLog');
 const weatherService = require('../services/weatherService');
 const emailService = require('../services/emailService');
 const Settings = require('../models/admin/Settings');
@@ -19,6 +20,8 @@ const start = () => {
 
         try {
             const farms = await Farm.find({ status: 'active' }).populate('owner', 'name email');
+            const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+
             logger.info(`[Daily Briefing] Processing ${farms.length} farms`);
 
             for (const farm of farms) {
@@ -28,6 +31,15 @@ const start = () => {
 
                     const settings = await Settings.findOne();
                     if (!settings?.emailToggles?.farmerDailyReport) continue;
+
+                    // Deduplication check
+                    const alreadySent = await BriefingLog.findOne({
+                        farm: farm._id, type: 'daily_briefing', sentAt: { $gte: todayStart },
+                    });
+                    if (alreadySent) {
+                        logger.info(`[Daily Briefing] Already sent for ${farm.name} today, skipping`);
+                        continue;
+                    }
 
                     const today = new Date(); today.setHours(0, 0, 0, 0);
                     const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
@@ -45,9 +57,7 @@ const start = () => {
 
                     const devices = await Device.find({ farm: farm._id });
                     const onlineDevices = devices.filter((d) => d.status === 'online').length;
-                    const deviceList = devices.map((d) => ({
-                        name: d.deviceId, status: d.status, lastSeen: d.lastSeen, battery: d.batteryLevel,
-                    }));
+                    const deviceList = devices.map((d) => ({ name: d.deviceId, status: d.status, lastSeen: d.lastSeen, battery: d.batteryLevel }));
 
                     const fieldIds = await Field.find({ farm: farm._id }).distinct('_id');
                     const latestReading = await SensorReading.findOne({ field: { $in: fieldIds } }).sort({ timestamp: -1 });
@@ -56,18 +66,12 @@ const start = () => {
                     try { const w = await weatherService.getFarmWeather(farm._id); weather = w; } catch {}
 
                     await emailService.send(farmer.email, 'farmerDailyReport', {
-                        user: farmer,
-                        farmName: farm.name,
+                        user: farmer, farmName: farm.name,
                         avgTemp: weather?.temperature?.avg?.toFixed(1) || 'N/A',
                         avgHumidity: weather?.humidity || 'N/A',
-                        todayMilk, yesterdayMilk,
-                        todayEggs, yesterdayEggs,
-                        animalCount,
-                        alertsCount: alerts.length,
-                        healthScore: 75,
-                        onlineDevices,
-                        totalDevices: devices.length,
-                        deviceList,
+                        todayMilk, yesterdayMilk, todayEggs, yesterdayEggs,
+                        animalCount, alertsCount: alerts.length, healthScore: 75,
+                        onlineDevices, totalDevices: devices.length, deviceList,
                         sensorReadings: latestReading ? {
                             temperature: latestReading.temperature,
                             humidity: latestReading.humidity,
@@ -76,6 +80,8 @@ const start = () => {
                         } : null,
                     });
 
+                    // Log sent
+                    await BriefingLog.create({ farm: farm._id, type: 'daily_briefing' });
                     logger.info(`[Daily Briefing] Sent to ${farm.name}`);
                 } catch (err) {
                     logger.error(`[Daily Briefing] Failed for ${farm.name}: ${err.message}`);

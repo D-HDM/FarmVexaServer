@@ -32,6 +32,7 @@ const emailToggleSchema = new mongoose.Schema({
     adminTrainingComplete: { type: Boolean, default: true },
     adminNewAdmin: { type: Boolean, default: true },
     adminWeeklyReport: { type: Boolean, default: true },
+    marketInquiry: { type: Boolean, default: true },
 });
 
 const smsToggleSchema = new mongoose.Schema({
@@ -49,6 +50,7 @@ const smsToggleSchema = new mongoose.Schema({
     adminSystemCritical: { type: Boolean, default: true },
     adminGeminiExceeded: { type: Boolean, default: true },
     adminPythonOffline: { type: Boolean, default: true },
+    marketInquiry: { type: Boolean, default: true },
 });
 
 const emailSettingsSchema = new mongoose.Schema({
@@ -136,23 +138,30 @@ const settingsSchema = new mongoose.Schema({
     sms: { type: smsSettingsSchema, default: () => ({}) },
     emailToggles: { type: emailToggleSchema, default: () => ({}) },
     smsToggles: { type: smsToggleSchema, default: () => ({}) },
-    system: {
-        appName: { type: String, default: 'FarmVexa' },
-        supportPhone: { type: String, default: '+254700000000' },
-        supportEmail: { type: String, default: 'support@farmvexa.com' },
-        whatsappNumber: { type: String, default: '' },
-        showWhatsapp: { type: Boolean, default: false },
-        dataRetentionDays: { type: Number, default: 90 },
-        autoBackup: { type: Boolean, default: false },
-        timezone: { type: String, default: 'Africa/Nairobi' },
-        language: { type: String, default: 'en' },
-        allowSelfRegistration: { type: Boolean, default: true },
-        downloads: [downloadSchema],
-        chatbot: { type: chatbotSchema, default: () => ({}) },
-        legal: { type: legalSchema, default: () => ({}) },
-        weatherTest: { type: weatherTestSchema, default: () => ({}) },
+system: {
+    appName: { type: String, default: 'FarmVexa' },
+    supportPhone: { type: String, default: '+254700000000' },
+    supportEmail: { type: String, default: 'support@farmvexa.com' },
+    whatsappNumber: { type: String, default: '' },
+    showWhatsapp: { type: Boolean, default: false },
+    dataRetentionDays: { type: Number, default: 90 },
+    backupFrequency: { type: String, enum: ['daily', 'weekly', 'monthly'], default: 'daily' },
+    backupEmail: { type: String, default: '' },
+    sendBackupEmail: { type: Boolean, default: false },
+    timezone: { type: String, default: 'Africa/Nairobi' },
+    language: { type: String, default: 'en' },
+    allowSelfRegistration: { type: Boolean, default: true },
+    downloads: [downloadSchema],
+    chatbot: { type: chatbotSchema, default: () => ({}) },
+    legal: { type: legalSchema, default: () => ({}) },
+    allowExternalCamera: { type: Boolean, default: true },
+    weatherTest: { type: weatherTestSchema, default: () => ({}) },
+    market: {
+        enabled: { type: Boolean, default: false },
+        updatedAt: Date,
     },
-    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+},
+updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Settings', settingsSchema);
