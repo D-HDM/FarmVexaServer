@@ -17,7 +17,9 @@ const getPublicSettings = asyncHandler(async (req, res) => {
         whatsappNumber: settings?.system?.whatsappNumber || '',
         showWhatsapp: settings?.system?.showWhatsapp ?? false,
         allowSelfRegistration: settings?.system?.allowSelfRegistration ?? true,
-        allowExternalCamera: settings?.system?.allowExternalCamera ?? true,
+        allowExternalCamera: settings?.system?.allowExternalCamera ?? false,
+        externalCameraInUrl: settings?.system?.externalCameraInUrl || 'https://hdmstream.pxxl.click/in',
+        externalCameraOutUrl: settings?.system?.externalCameraOutUrl || 'https://hdmstream.pxxl.click/out',
         downloads: settings?.system?.downloads?.filter((d) => d.enabled) || [],
         chatbot: {
             enabled: settings?.system?.chatbot?.enabled || false,

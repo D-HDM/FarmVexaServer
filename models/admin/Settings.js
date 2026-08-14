@@ -155,6 +155,8 @@ system: {
     chatbot: { type: chatbotSchema, default: () => ({}) },
     legal: { type: legalSchema, default: () => ({}) },
     allowExternalCamera: { type: Boolean, default: true },
+    externalCameraOutUrl: { type: String, default: 'https://hdmstream.pxxl.click/out' },
+    externalCameraInUrl: { type: String, default: 'https://hdmstream.pxxl.click/in' },
     weatherTest: { type: weatherTestSchema, default: () => ({}) },
     market: {
         enabled: { type: Boolean, default: false },
