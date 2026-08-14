@@ -4,6 +4,7 @@ const Field = require('../../models/farm/Field');
 const TeamMember = require('../../models/farm/TeamMember');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
+const { deleteFile } = require('../../config/cloudinary');
 
 const uploadAndAnalyze = asyncHandler(async (req, res) => {
     if (!req.file) return errorResponse(res, 'No image file provided', 400);
@@ -34,4 +35,23 @@ const getImageById = asyncHandler(async (req, res) => {
     return successResponse(res, { image });
 });
 
-module.exports = { uploadAndAnalyze, getFieldImages, getImageById };
+const deleteImage = asyncHandler(async (req, res) => {
+    const image = await imageService.getImageById(req.params.id);
+    if (!image) return errorResponse(res, 'Image not found', 404);
+
+    // Delete from Cloudinary if it has a cloudinary ID
+    if (image.cloudinaryId) {
+        try {
+            await deleteFile(image.cloudinaryId);
+        } catch (error) {
+            console.error(`Failed to delete from Cloudinary: ${error.message}`);
+        }
+    }
+
+    // Delete from database
+    await imageService.deleteImage(req.params.id);
+
+    return successResponse(res, null, 'Image deleted');
+});
+
+module.exports = { uploadAndAnalyze, getFieldImages, getImageById, deleteImage };

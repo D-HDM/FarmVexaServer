@@ -97,6 +97,10 @@ class ImageService {
     async getImageById(imageId) {
         return CropImage.findById(imageId).lean();
     }
+
+    async deleteImage(imageId) {
+        return CropImage.findByIdAndDelete(imageId);
+    }
 }
 
 module.exports = new ImageService();
