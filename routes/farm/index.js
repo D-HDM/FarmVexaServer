@@ -8,6 +8,7 @@ router.use('/crops', require('./cropRoutes'));
 router.use('/devices', require('./deviceRoutes'));
 router.use('/sensors', require('./sensorRoutes'));
 router.use('/images', require('./imageRoutes'));
+router.use('/field-scan', require('./fieldScanRoutes'));
 router.use('/alerts', require('./alertRoutes'));
 router.use('/chat', require('./chatRoutes'));
 router.use('/animals', require('./animalRoutes'));

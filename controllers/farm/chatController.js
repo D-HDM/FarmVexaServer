@@ -29,7 +29,8 @@ const startChat = asyncHandler(async (req, res) => {
     const systemPrompt = aiContextService.buildSystemPrompt(systemContext, farmContext);
 
     const aiResult = await aiService.farmerChat(message, systemPrompt);
-    await limitService.logUsage(req.user.id, 'chat', aiResult.success, 0, farmId);
+    const keyUsed = aiResult.data?.keyUsed || 'primary';
+    await limitService.logUsage(req.user.id, 'chat', aiResult.success, 0, farmId, keyUsed);
 
     const chat = await Chat.create({
         user: req.user.id,
@@ -64,7 +65,8 @@ const sendMessage = asyncHandler(async (req, res) => {
     await chat.save();
 
     const aiResult = await aiService.farmerChat(message, systemPrompt);
-    await limitService.logUsage(req.user.id, 'chat', aiResult.success, 0, farmId);
+    const keyUsed = aiResult.data?.keyUsed || 'primary';
+    await limitService.logUsage(req.user.id, 'chat', aiResult.success, 0, farmId, keyUsed);
 
     chat.messages.push({ role: 'assistant', content: aiResult.data?.reply || aiResult.data || 'No response' });
     chat.lastMessageAt = new Date();

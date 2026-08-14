@@ -21,6 +21,27 @@ const getPublicSettings = asyncHandler(async (req, res) => {
         externalCameraInUrl: settings?.system?.externalCameraInUrl || 'https://hdmstream.pxxl.click/in',
         externalCameraOutUrl: settings?.system?.externalCameraOutUrl || 'https://hdmstream.pxxl.click/out',
         downloads: settings?.system?.downloads?.filter((d) => d.enabled) || [],
+        fieldScan: {
+            enabled: settings?.fieldScan?.enabled ?? false,
+            maxPhotosPerScan: settings?.fieldScan?.maxPhotosPerScan ?? 100,
+            captureInterval: settings?.fieldScan?.captureInterval ?? 5,
+            farmerLimits: {
+                daily: settings?.fieldScan?.farmerLimits?.daily ?? 10,
+                weekly: settings?.fieldScan?.farmerLimits?.weekly ?? 50,
+                monthly: settings?.fieldScan?.farmerLimits?.monthly ?? 200,
+            },
+            fieldLimits: {
+                daily: settings?.fieldScan?.fieldLimits?.daily ?? 10,
+                weekly: settings?.fieldScan?.fieldLimits?.weekly ?? 50,
+                monthly: settings?.fieldScan?.fieldLimits?.monthly ?? 200,
+            },
+            allowedCropTypes: settings?.fieldScan?.allowedCropTypes || ['tomato', 'maize', 'potato', 'bean', 'cassava', 'coffee', 'tea', 'wheat', 'rice'],
+            requireGpsAccuracy: settings?.fieldScan?.requireGpsAccuracy ?? 15,
+            preFilterEnabled: settings?.fieldScan?.preFilterEnabled ?? true,
+            maxGeminiCallsPerScan: settings?.fieldScan?.maxGeminiCallsPerScan ?? 30,
+            minPhotoSize: settings?.fieldScan?.minPhotoSize ?? 50,
+            maxPhotoSize: settings?.fieldScan?.maxPhotoSize ?? 500,
+        },
         chatbot: {
             enabled: settings?.system?.chatbot?.enabled || false,
             name: settings?.system?.chatbot?.name || 'FarmVexa AI',

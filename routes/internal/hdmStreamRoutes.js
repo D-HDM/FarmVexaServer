@@ -2,6 +2,7 @@ const router = require('express').Router();
 const User = require('../../models/farm/User');
 const TeamMember = require('../../models/farm/TeamMember');
 const Farm = require('../../models/farm/Farm');
+const Settings = require('../../models/admin/Settings');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
@@ -32,6 +33,21 @@ const getFarmsForUser = async (user, role) => {
     }
 
     return { farms, farmId };
+};
+
+const getFieldScanSettings = async () => {
+    const settings = await Settings.findOne();
+    const fieldScan = settings?.fieldScan || {};
+
+    return {
+        enabled: fieldScan.enabled ?? false,
+        maxPhotosPerScan: fieldScan.maxPhotosPerScan ?? 100,
+        captureInterval: fieldScan.captureInterval ?? 5,
+        requireGpsAccuracy: fieldScan.requireGpsAccuracy ?? 15,
+        allowedCropTypes: fieldScan.allowedCropTypes || ['tomato', 'maize', 'potato', 'bean', 'cassava', 'coffee', 'tea', 'wheat', 'rice'],
+        minPhotoSize: fieldScan.minPhotoSize ?? 50,
+        maxPhotoSize: fieldScan.maxPhotoSize ?? 500,
+    };
 };
 
 const validateCredentials = asyncHandler(async (req, res) => {
@@ -72,6 +88,7 @@ const validateCredentials = asyncHandler(async (req, res) => {
     }
 
     const { farms, farmId } = await getFarmsForUser(user, role);
+    const fieldScan = await getFieldScanSettings();
 
     return successResponse(res, {
         user: {
@@ -85,6 +102,7 @@ const validateCredentials = asyncHandler(async (req, res) => {
             county: user.county || '',
             subCounty: user.subCounty || '',
         },
+        fieldScan,
     }, 'Credentials validated');
 });
 
@@ -104,6 +122,7 @@ const getUserById = asyncHandler(async (req, res) => {
     }
 
     const { farms, farmId } = await getFarmsForUser(user, role);
+    const fieldScan = await getFieldScanSettings();
 
     return successResponse(res, {
         user: {
@@ -117,6 +136,7 @@ const getUserById = asyncHandler(async (req, res) => {
             county: user.county || '',
             subCounty: user.subCounty || '',
         },
+        fieldScan,
     });
 });
 

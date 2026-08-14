@@ -16,7 +16,7 @@ const updateSettings = asyncHandler(async (req, res) => {
         settings = new Settings();
     }
 
-    const { gemini, ai, alerts, email, sms, emailToggles, smsToggles, system } = req.body;
+    const { gemini, ai, alerts, email, sms, emailToggles, smsToggles, system, fieldScan } = req.body;
 
     if (gemini) {
         settings.gemini = { ...settings.gemini.toObject?.() || settings.gemini, ...gemini };
@@ -46,6 +46,11 @@ const updateSettings = asyncHandler(async (req, res) => {
         const currentSmsToggles = settings.smsToggles?.toObject?.() || settings.smsToggles || {};
         settings.smsToggles = { ...currentSmsToggles, ...smsToggles };
         settings.markModified('smsToggles');
+    }
+    if (fieldScan) {
+        const currentFieldScan = settings.fieldScan?.toObject?.() || settings.fieldScan || {};
+        settings.fieldScan = { ...currentFieldScan, ...fieldScan };
+        settings.markModified('fieldScan');
     }
     if (system) {
         settings.system = { ...settings.system.toObject?.() || settings.system, ...system };

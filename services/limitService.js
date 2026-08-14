@@ -22,8 +22,16 @@ class LimitService {
         return { allowed: true, remaining: perUserLimit - userCount, used: userCount, limit: perUserLimit };
     }
 
-    async logUsage(userId, endpoint, success = true, tokensUsed = 0, farmId = null) {
-        await Usage.create({ user: userId, farm: farmId, endpoint, tokensUsed, success, requestTimestamp: new Date() });
+    async logUsage(userId, endpoint, success = true, tokensUsed = 0, farmId = null, keyUsed = 'primary') {
+        await Usage.create({ 
+            user: userId, 
+            farm: farmId, 
+            endpoint, 
+            tokensUsed, 
+            success, 
+            keyUsed,
+            requestTimestamp: new Date() 
+        });
         this.checkThresholds();
     }
 
@@ -66,7 +74,28 @@ class LimitService {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const todayCount = await Usage.countDocuments({ requestTimestamp: { $gte: today } });
         const totalCount = await Usage.countDocuments();
-        return { today: todayCount, total: totalCount };
+        
+        // Breakdown by endpoint
+        const byEndpoint = await Usage.aggregate([
+            { $match: { requestTimestamp: { $gte: today } } },
+            { $group: { _id: '$endpoint', count: { $sum: 1 } } },
+        ]);
+        
+        // Breakdown by key — treat missing keyUsed as "primary"
+        const byKey = await Usage.aggregate([
+            { $match: { requestTimestamp: { $gte: today } } },
+            { $group: { 
+                _id: { $ifNull: ['$keyUsed', 'primary'] }, 
+                count: { $sum: 1 } 
+            } },
+        ]);
+
+        return { 
+            today: todayCount, 
+            total: totalCount, 
+            byEndpoint: byEndpoint.reduce((acc, item) => { acc[item._id] = item.count; return acc; }, {}),
+            byKey: byKey.reduce((acc, item) => { acc[item._id] = item.count; return acc; }, {}),
+        };
     }
 }
 
