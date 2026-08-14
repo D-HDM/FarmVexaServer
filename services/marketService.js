@@ -44,15 +44,16 @@ class MarketService {
             message: data.message,
         });
 
-        // Send SMS to farmer
+        // Send SMS
         if (product.contactWhatsapp || product.contactPhone) {
             const phone = product.contactWhatsapp || product.contactPhone;
-            const smsMsg = `FarmVexa Market: New inquiry for ${product.name} from ${data.buyerName}${data.buyerPhone ? ' (' + data.buyerPhone + ')' : ''}. Message: ${data.message?.substring(0, 80)}`;
             try {
-                await smsService.send(phone, 'farmerAlertMedium', {
+                await smsService.send(phone, 'marketInquirySMS', {
                     user: { name: product.farmer?.name || 'Farmer' },
-                    message: smsMsg,
-                    farmName: product.farm?.name || 'Your Farm',
+                    productName: product.name,
+                    buyerName: data.buyerName,
+                    buyerPhone: data.buyerPhone,
+                    message: data.message,
                 });
                 inquiry.sentSMS = true;
             } catch (err) {
@@ -60,15 +61,20 @@ class MarketService {
             }
         }
 
-        // Send email to farmer
+        // Send email
         if (product.contactEmail || product.farmer?.email) {
             const email = product.contactEmail || product.farmer?.email;
             try {
-                await emailService.send(email, 'farmerAlertMedium', {
+                await emailService.send(email, 'marketInquiryEmail', {
                     user: { name: product.farmer?.name || 'Farmer' },
-                    message: `New inquiry for ${product.name} from ${data.buyerName}`,
-                    farmName: product.farm?.name || 'Your Farm',
-                    recommendation: `Buyer: ${data.buyerName}\n${data.buyerPhone ? 'Phone: ' + data.buyerPhone + '\n' : ''}${data.buyerEmail ? 'Email: ' + data.buyerEmail + '\n' : ''}Message: ${data.message}`,
+                    productName: product.name,
+                    price: product.price,
+                    unit: product.unit,
+                    quantity: product.quantity,
+                    buyerName: data.buyerName,
+                    buyerPhone: data.buyerPhone,
+                    buyerEmail: data.buyerEmail,
+                    message: data.message,
                 });
                 inquiry.sentEmail = true;
             } catch (err) {
@@ -80,10 +86,17 @@ class MarketService {
         return inquiry;
     }
 
-    async getFarmerInquiries(farmerId) {
-        return MarketInquiry.find({ farmer: farmerId })
+    async getFarmerInquiries(farmerId, page = 1, limit = 20) {
+        const skip = (page - 1) * limit;
+        const inquiries = await MarketInquiry.find({ farmer: farmerId })
             .populate('product', 'name price unit')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        const total = await MarketInquiry.countDocuments({ farmer: farmerId });
+
+        return { inquiries, total, page: parseInt(page), pages: Math.ceil(total / limit) };
     }
 
     async markInquiryRead(inquiryId, farmerId) {
@@ -92,6 +105,10 @@ class MarketService {
             { isRead: true, readAt: new Date() },
             { new: true }
         );
+    }
+
+    async deleteInquiry(inquiryId, farmerId) {
+        return MarketInquiry.findOneAndDelete({ _id: inquiryId, farmer: farmerId });
     }
 }
 

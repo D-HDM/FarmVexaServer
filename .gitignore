@@ -43,6 +43,7 @@ Thumbs.db
 uploads/*
 !uploads/.gitkeep
 temp/
+backups/
 
 # Python
 __pycache__/
