@@ -10,62 +10,10 @@ const Settings = require('../models/admin/Settings');
 const Admin = require('../models/admin/Admin');
 const logger = require('../utils/logger');
 
-let dailyTask = null;
 let weeklyTask = null;
 
 const start = () => {
-    dailyTask = cron.schedule('0 6 * * *', async () => {
-        logger.info('Generating daily farm reports...');
-
-        try {
-            const farms = await Farm.find({ status: 'active' }).populate('owner');
-
-            for (const farm of farms) {
-                if (!farm.owner) continue;
-
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-
-                const readings = await SensorReading.find({
-                    field: { $in: await require('../models/farm/Field').find({ farm: farm._id }).distinct('_id') },
-                    timestamp: { $gte: today },
-                });
-
-                const alerts = await Alert.countDocuments({
-                    farm: farm._id,
-                    createdAt: { $gte: today },
-                });
-
-                const avgTemp = readings.length > 0
-                    ? (readings.reduce((sum, r) => sum + (r.temperature || 0), 0) / readings.length).toFixed(1)
-                    : 'N/A';
-                const avgHumidity = readings.length > 0
-                    ? (readings.reduce((sum, r) => sum + (r.humidity || 0), 0) / readings.length).toFixed(1)
-                    : 'N/A';
-                const avgSoilMoisture = readings.length > 0
-                    ? (readings.reduce((sum, r) => sum + (r.soilMoisture || 0), 0) / readings.length).toFixed(1)
-                    : 'N/A';
-
-                const settings = await Settings.findOne();
-                const template = await emailTemplates.farmerDailyReport(
-                    farm.owner,
-                    {
-                        farmName: farm.name,
-                        avgTemp,
-                        avgHumidity,
-                        avgSoilMoisture,
-                        healthScore: 75,
-                        alertsCount: alerts,
-                    },
-                    settings
-                );
-
-                await sendEmail(farm.owner.email, template.subject, template.html);
-            }
-        } catch (error) {
-            logger.error(`Daily report scheduler error: ${error.message}`);
-        }
-    });
+    // REMOVED daily report — handled by dailyBriefingScheduler
 
     weeklyTask = cron.schedule('0 6 * * 1', async () => {
         logger.info('Generating weekly reports...');
@@ -135,7 +83,6 @@ const start = () => {
 };
 
 const stop = () => {
-    if (dailyTask) dailyTask.stop();
     if (weeklyTask) weeklyTask.stop();
 };
 

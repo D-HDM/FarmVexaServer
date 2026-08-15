@@ -13,9 +13,17 @@ const Settings = require('../models/admin/Settings');
 const logger = require('../utils/logger');
 
 let task = null;
+let isRunning = false; // ← Prevent overlapping runs
 
 const start = () => {
     task = cron.schedule('0 6 * * *', async () => {
+        // Prevent duplicate execution
+        if (isRunning) {
+            logger.warn('[Daily Briefing] Already running, skipping...');
+            return;
+        }
+        isRunning = true;
+
         logger.info('[Daily Briefing] Starting...');
 
         try {
@@ -33,10 +41,15 @@ const start = () => {
                     const settings = await Settings.findOne();
                     if (!settings?.emailToggles?.farmerDailyReport) continue;
 
-                    // Atomic deduplication — create log FIRST
-                    try {
-                        await BriefingLog.create({ farm: farm._id, type: 'daily_briefing', dateKey });
-                    } catch (dupErr) {
+                    // Atomic deduplication — use findOneAndUpdate with upsert
+                    const existing = await BriefingLog.findOneAndUpdate(
+                        { farm: farm._id, type: 'daily_briefing', dateKey },
+                        { $setOnInsert: { farm: farm._id, type: 'daily_briefing', dateKey, createdAt: new Date() } },
+                        { upsert: true, new: true }
+                    );
+
+                    // Check if this was newly created or already existed
+                    if (existing.createdAt < todayStart) {
                         logger.info(`[Daily Briefing] Already sent for ${farm.name} today, skipping`);
                         continue;
                     }
@@ -65,7 +78,12 @@ const start = () => {
                     const latestReading = await SensorReading.findOne({ field: { $in: fieldIds } }).sort({ timestamp: -1 });
 
                     let weather = null;
-                    try { const w = await weatherService.getFarmWeather(farm._id); weather = w; } catch {}
+                    try { 
+                        const w = await weatherService.getFarmWeather(farm._id); 
+                        weather = w; 
+                    } catch (weatherErr) {
+                        logger.warn(`[Daily Briefing] Weather failed for ${farm.name}: ${weatherErr.message}`);
+                    }
 
                     await emailService.send(farmer.email, 'farmerDailyReport', {
                         user: farmer,
@@ -88,19 +106,28 @@ const start = () => {
                         } : null,
                     });
 
+                    // Mark as sent
+                    await BriefingLog.findOneAndUpdate(
+                        { farm: farm._id, type: 'daily_briefing', dateKey },
+                        { $set: { sentAt: new Date(), status: 'sent' } }
+                    );
+
                     logger.info(`[Daily Briefing] Sent to ${farm.name}`);
                 } catch (err) {
-                    // If email fails, remove the log so retry can happen
                     await BriefingLog.deleteOne({ farm: farm._id, type: 'daily_briefing', dateKey }).catch(() => {});
                     logger.error(`[Daily Briefing] Failed for ${farm.name}: ${err.message}`);
                 }
             }
         } catch (err) {
             logger.error(`[Daily Briefing] Error: ${err.message}`);
+        } finally {
+            isRunning = false;
         }
     });
 };
 
-const stop = () => { if (task) task.stop(); };
+const stop = () => { 
+    if (task) task.stop(); 
+};
 
 module.exports = { start, stop };

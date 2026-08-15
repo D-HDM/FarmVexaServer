@@ -22,7 +22,7 @@ class LimitService {
         return { allowed: true, remaining: perUserLimit - userCount, used: userCount, limit: perUserLimit };
     }
 
-    async logUsage(userId, endpoint, success = true, tokensUsed = 0, farmId = null, keyUsed = 'primary') {
+    async logUsage(userId, endpoint, success = true, tokensUsed = 0, farmId = null, keyUsed = 'primary', metadata = {}) {
         await Usage.create({ 
             user: userId, 
             farm: farmId, 
@@ -30,6 +30,7 @@ class LimitService {
             tokensUsed, 
             success, 
             keyUsed,
+            metadata,
             requestTimestamp: new Date() 
         });
         this.checkThresholds();

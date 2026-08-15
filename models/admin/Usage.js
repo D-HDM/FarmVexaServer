@@ -7,6 +7,7 @@ const usageSchema = new mongoose.Schema({
     keyUsed: { type: String, enum: ['primary', 'backup', 'fieldscan_primary', 'fieldscan_backup'], default: 'primary' },
     tokensUsed: { type: Number, default: 0 },
     success: { type: Boolean, default: true },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     requestTimestamp: { type: Date, default: Date.now },
 }, { timestamps: true });
 

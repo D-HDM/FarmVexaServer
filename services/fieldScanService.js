@@ -1,6 +1,4 @@
 const axios = require('axios');
-const FormData = require('form-data');
-const fs = require('fs');
 const env = require('../config/env');
 const logger = require('../utils/logger');
 
@@ -10,7 +8,7 @@ class FieldScanService {
         this.apiKey = env.internalApiKey;
     }
 
-    async analyzeFieldScan(frames, cropType, fieldId, maxGeminiCalls, preFilterEnabled) {
+    async analyzeFieldScan(frames, cropType, fieldId, maxGeminiCalls, preFilterEnabled, preFilterPercentage) {
         try {
             const response = await axios.post(
                 `${this.baseUrl}/api/analyze/field-scan`,
@@ -20,13 +18,14 @@ class FieldScanService {
                     frames,
                     maxGeminiCalls: maxGeminiCalls || 30,
                     preFilterEnabled: preFilterEnabled ?? true,
+                    preFilterPercentage: preFilterPercentage || 60,
                 },
                 {
                     headers: {
                         'Content-Type': 'application/json',
                         'x-api-key': this.apiKey,
                     },
-                    timeout: 120000, // 2 minutes for batch processing
+                    timeout: 300000, // 5 minutes for batch processing
                 }
             );
             return response.data;

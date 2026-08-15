@@ -1,6 +1,7 @@
 const fieldScanService = require('../../services/fieldScanService');
 const limitService = require('../../services/limitService');
 const Field = require('../../models/farm/Field');
+const FieldScan = require('../../models/farm/FieldScan');
 const Settings = require('../../models/admin/Settings');
 const Usage = require('../../models/admin/Usage');
 const emailService = require('../../services/emailService');
@@ -9,7 +10,6 @@ const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
-// Check if field scan is enabled and limits not exceeded
 const checkFieldScanAccess = async (userId, fieldId) => {
     const settings = await Settings.findOne();
     const fieldScanSettings = settings?.fieldScan || {};
@@ -18,11 +18,9 @@ const checkFieldScanAccess = async (userId, fieldId) => {
         return { allowed: false, reason: 'Field scan is currently disabled' };
     }
 
-    // Check daily limits
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Farmer daily limit
     const farmerDaily = await Usage.countDocuments({
         user: userId,
         endpoint: 'field_scan',
@@ -33,7 +31,6 @@ const checkFieldScanAccess = async (userId, fieldId) => {
         return { allowed: false, reason: `Daily field scan limit reached (${farmerDaily}/${farmerDailyLimit})` };
     }
 
-    // Field daily limit
     const fieldDaily = await Usage.countDocuments({
         farm: fieldId,
         endpoint: 'field_scan',
@@ -44,7 +41,6 @@ const checkFieldScanAccess = async (userId, fieldId) => {
         return { allowed: false, reason: `Field daily scan limit reached (${fieldDaily}/${fieldDailyLimit})` };
     }
 
-    // Check weekly limits
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
     weekStart.setHours(0, 0, 0, 0);
@@ -59,7 +55,6 @@ const checkFieldScanAccess = async (userId, fieldId) => {
         return { allowed: false, reason: `Weekly field scan limit reached (${farmerWeekly}/${farmerWeeklyLimit})` };
     }
 
-    // Check monthly limits
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
@@ -89,13 +84,22 @@ const startFieldScan = asyncHandler(async (req, res) => {
 
     const farmId = field.farm;
 
-    await limitService.logUsage(req.user.id, 'field_scan', true, 0, farmId, 'fieldscan_primary');
+    // Create scan record
+    const scan = await FieldScan.create({
+        user: req.user.id,
+        farm: farmId,
+        field: fieldId,
+        cropType: req.body.cropType || '',
+        status: 'processing',
+    });
 
-    return successResponse(res, { scanSession: { fieldId, farmId, startedAt: new Date() } }, 'Field scan started', 201);
+    await limitService.logUsage(req.user.id, 'field_scan', true, 0, farmId, 'fieldscan_primary', { scanStatus: 'started', scanId: scan._id });
+
+    return successResponse(res, { scanSession: { scanId: scan._id, fieldId, farmId, startedAt: new Date() } }, 'Field scan started', 201);
 });
 
 const analyzeFieldScan = asyncHandler(async (req, res) => {
-    const { fieldId, cropType, frames, maxGeminiCalls, preFilterEnabled } = req.body;
+    const { fieldId, cropType, frames, maxGeminiCalls, preFilterEnabled, preFilterPercentage } = req.body;
 
     if (!fieldId) return errorResponse(res, 'fieldId is required', 400);
     if (!cropType) return errorResponse(res, 'cropType is required', 400);
@@ -106,33 +110,88 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
 
     const farmId = field.farm;
 
-    // Check field scan settings
     const settings = await Settings.findOne();
     const maxPhotos = settings?.fieldScan?.maxPhotosPerScan || 100;
     if (frames.length > maxPhotos) {
         return errorResponse(res, `Maximum ${maxPhotos} photos per scan`, 400);
     }
 
-    // Check access
     const access = await checkFieldScanAccess(req.user.id, fieldId);
     if (!access.allowed) return errorResponse(res, access.reason, 429);
 
-    // Call Python AI
-    const aiResult = await fieldScanService.analyzeFieldScan(
-        frames,
+    // Create scan record
+    const scan = await FieldScan.create({
+        user: req.user.id,
+        farm: farmId,
+        field: fieldId,
         cropType,
-        fieldId,
-        maxGeminiCalls || settings?.fieldScan?.maxGeminiCallsPerScan || 30,
-        preFilterEnabled ?? settings?.fieldScan?.preFilterEnabled ?? true
-    );
+        totalFrames: frames.length,
+        status: 'processing',
+    });
+
+    // Call Python AI
+    let aiResult;
+    try {
+        aiResult = await fieldScanService.analyzeFieldScan(
+            frames,
+            cropType,
+            fieldId,
+            maxGeminiCalls || settings?.fieldScan?.maxGeminiCallsPerScan || 30,
+            preFilterEnabled ?? settings?.fieldScan?.preFilterEnabled ?? true,
+            preFilterPercentage || settings?.fieldScan?.preFilterPercentage || 60
+        );
+    } catch (aiError) {
+        // Mark scan as failed
+        scan.status = 'failed';
+        scan.errorMessage = aiError.message;
+        await scan.save();
+        
+        // Log failed usage
+        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiError.message });
+        
+        return errorResponse(res, aiError.message || 'Field scan analysis failed', 500);
+    }
 
     if (!aiResult.success) {
+        scan.status = 'failed';
+        scan.errorMessage = aiResult.message || 'Analysis failed';
+        await scan.save();
+        
+        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiResult.message });
+        
         return errorResponse(res, aiResult.message || 'Field scan analysis failed', 500);
     }
 
-    // Log usage with key info
-    const keyUsage = aiResult.data?.keyUsage || {};
-    const analyzedFrames = aiResult.data?.analyzedFrames || 0;
+    // Update scan with results
+    const data = aiResult.data || {};
+    const keyUsage = data.keyUsage || {};
+    const analyzedFrames = data.analyzedFrames || 0;
+
+    scan.status = 'completed';
+    scan.totalFrames = data.totalFrames || frames.length;
+    scan.preFilteredFrames = data.preFilteredFrames || 0;
+    scan.skippedFrames = data.skippedFrames || 0;
+    scan.analyzedFrames = analyzedFrames;
+    scan.geminiRequests = data.geminiRequests || 0;
+    scan.batchSize = data.batchSize || 16;
+    scan.duration = data.duration || 0;
+    scan.skipReasons = data.skipReasons || {};
+    scan.photos = data.results || [];
+    scan.summary = data.summary || {};
+    scan.keyUsage = keyUsage;
+    await scan.save();
+
+    // Log usage with full metadata
+    const metadata = {
+        scanId: scan._id,
+        totalFrames: scan.totalFrames,
+        preFilteredFrames: scan.preFilteredFrames,
+        skippedFrames: scan.skippedFrames,
+        geminiRequests: scan.geminiRequests,
+        batchSize: scan.batchSize,
+        duration: scan.duration,
+        skipReasons: scan.skipReasons,
+    };
 
     await limitService.logUsage(
         req.user.id,
@@ -140,15 +199,16 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         true,
         analyzedFrames,
         farmId,
-        keyUsage.fieldscan_backup > keyUsage.fieldscan_primary ? 'fieldscan_backup' : 'fieldscan_primary'
+        keyUsage.fieldscan_backup > keyUsage.fieldscan_primary ? 'fieldscan_backup' : 'fieldscan_primary',
+        metadata
     );
 
-    // Send email notification
+    // Send email
     try {
         const emailToggles = settings?.emailToggles || {};
         if (emailToggles.farmerFieldScanResults !== false) {
             const user = await User.findById(req.user.id);
-            const summary = aiResult.data?.summary || {};
+            const summary = scan.summary || {};
             
             await emailService.send(
                 user.email,
@@ -158,9 +218,9 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                     fieldName: field.name,
                     cropType,
                     scanDate: new Date(),
-                    duration: null,
-                    totalPhotos: frames.length,
-                    analyzedPhotos: analyzedFrames,
+                    duration: scan.duration ? `${scan.duration}s` : null,
+                    totalPhotos: scan.totalFrames,
+                    analyzedPhotos: scan.analyzedFrames,
                     coverage: null,
                     healthyCount: summary.healthyCount || 0,
                     healthyPercentage: summary.healthyPercentage || 0,
@@ -168,20 +228,22 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                     diseases: summary.diseases || [],
                     weeds: summary.weeds || { pressure: 'None', hotspots: [] },
                     pests: summary.pests || { activity: 'None', affectedAreas: 0 },
-                    recommendations: (aiResult.data?.results || [])
-                        .filter((r) => r.analysis?.recommendation)
-                        .map((r) => r.analysis.recommendation)
+                    recommendations: (scan.photos || [])
+                        .filter((p) => p.analysis?.recommendation)
+                        .map((p) => p.analysis.recommendation)
                         .slice(0, 5) || [],
-                    scanId: null,
+                    scanId: scan._id,
                 }
             );
+
+            scan.emailSent = true;
+            await scan.save();
         }
     } catch (emailError) {
         logger.error(`Field scan email failed: ${emailError.message}`);
-        // Don't block the response — email is non-critical
     }
 
-    return successResponse(res, aiResult.data, 'Field scan analysis complete');
+    return successResponse(res, { ...data, scanId: scan._id }, 'Field scan analysis complete');
 });
 
 const getFieldScanSettings = asyncHandler(async (req, res) => {
@@ -192,6 +254,7 @@ const getFieldScanSettings = asyncHandler(async (req, res) => {
         enabled: fieldScan.enabled ?? false,
         maxPhotosPerScan: fieldScan.maxPhotosPerScan ?? 100,
         captureInterval: fieldScan.captureInterval ?? 5,
+        preFilterPercentage: fieldScan.preFilterPercentage ?? 60,
         farmerLimits: fieldScan.farmerLimits || { daily: 10, weekly: 50, monthly: 200 },
         fieldLimits: fieldScan.fieldLimits || { daily: 10, weekly: 50, monthly: 200 },
         allowedCropTypes: fieldScan.allowedCropTypes || [],
@@ -204,11 +267,36 @@ const getFieldScanSettings = asyncHandler(async (req, res) => {
 });
 
 const getMyFieldScans = asyncHandler(async (req, res) => {
-    const scans = await Usage.find({ user: req.user.id, endpoint: 'field_scan' })
-        .sort({ requestTimestamp: -1 })
-        .limit(20)
+    const scans = await FieldScan.find({ user: req.user.id })
+        .populate('field', 'name')
+        .populate('farm', 'name')
+        .sort({ createdAt: -1 })
+        .limit(50)
         .lean();
     return successResponse(res, { scans });
+});
+
+const getFieldScanById = asyncHandler(async (req, res) => {
+    const scan = await FieldScan.findOne({ _id: req.params.id, user: req.user.id })
+        .populate('field', 'name')
+        .populate('farm', 'name')
+        .lean();
+    if (!scan) return errorResponse(res, 'Scan not found', 404);
+    return successResponse(res, { scan });
+});
+
+const getFieldScansByField = asyncHandler(async (req, res) => {
+    const scans = await FieldScan.find({ field: req.params.fieldId, user: req.user.id })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+    return successResponse(res, { scans });
+});
+
+const deleteFieldScan = asyncHandler(async (req, res) => {
+    const scan = await FieldScan.findOneAndDelete({ _id: req.params.id, user: req.user.id });
+    if (!scan) return errorResponse(res, 'Scan not found', 404);
+    return successResponse(res, null, 'Scan deleted');
 });
 
 module.exports = {
@@ -216,4 +304,7 @@ module.exports = {
     analyzeFieldScan,
     getFieldScanSettings,
     getMyFieldScans,
+    getFieldScanById,
+    getFieldScansByField,
+    deleteFieldScan,
 };
