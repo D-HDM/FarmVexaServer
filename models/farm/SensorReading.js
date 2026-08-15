@@ -9,13 +9,15 @@ const sensorReadingSchema = new mongoose.Schema({
     field: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Field',
-        required: true,
+        required: false,  // Made optional for storage sensors
     },
     temperature: Number,
     humidity: Number,
     soilMoisture: Number,
     lightLevel: Number,
     soilPH: Number,
+    co2: Number,        // ppm — for storage insect detection
+    motion: Boolean,    // PIR motion detected — for rat detection
     npk: {
         nitrogen: Number,
         phosphorus: Number,

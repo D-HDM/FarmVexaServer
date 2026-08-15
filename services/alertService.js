@@ -27,6 +27,100 @@ class AlertService {
         return alert;
     }
 
+    async createStorageAlert({ farm, field, type, severity, message, recommendation, data }) {
+        const settings = await Settings.findOne();
+        const storage = settings?.storage || {};
+        const cooldownHours = storage.cooldownHours || 6;
+
+        // Check cooldown — don't alert more than once per cooldown period
+        const lastAlert = await Alert.findOne({
+            farm,
+            type,
+            createdAt: { $gte: new Date(Date.now() - cooldownHours * 3600 * 1000) },
+        });
+
+        if (lastAlert) {
+            logger.info(`[Storage Alert] Cooldown active for ${type} — skipping`);
+            return null;
+        }
+
+        const alert = await Alert.create({
+            farm,
+            field,
+            type,
+            severity: severity || 'medium',
+            message,
+            recommendation,
+        });
+
+        // Only critical/high alerts get email + SMS
+        if (severity === 'high' || severity === 'critical') {
+            await this.sendStorageAlertNotifications(alert, data);
+        }
+
+        return alert;
+    }
+
+    async sendStorageAlertNotifications(alert, data = {}) {
+        try {
+            const farm = await Farm.findById(alert.farm).populate('owner');
+            if (!farm || !farm.owner) return;
+
+            const user = farm.owner;
+            const settings = await Settings.findOne();
+            const toggles = settings?.emailToggles || {};
+            const smsToggles = settings?.smsToggles || {};
+
+            // Determine which toggle to check
+            let emailToggleKey = null;
+            let smsToggleKey = null;
+
+            switch (alert.type) {
+                case 'storage_temp_critical':
+                    emailToggleKey = 'farmerStorageTempCritical';
+                    smsToggleKey = 'farmerStorageTempCritical';
+                    break;
+                case 'storage_humidity_critical':
+                    emailToggleKey = 'farmerStorageHumidityCritical';
+                    smsToggleKey = 'farmerStorageHumidityCritical';
+                    break;
+                case 'storage_co2_critical':
+                    emailToggleKey = 'farmerStorageCo2Critical';
+                    smsToggleKey = 'farmerStorageCo2Critical';
+                    break;
+                case 'storage_rat_detected':
+                    emailToggleKey = 'farmerStorageRatDetected';
+                    smsToggleKey = 'farmerStorageRatDetected';
+                    break;
+            }
+
+            // Send SMS
+            if (smsToggleKey && smsToggles[smsToggleKey] !== false) {
+                const smsTemplate = await smsTemplates.farmerStorageAlert(user, {
+                    ...data,
+                    message: alert.message,
+                    farmName: farm.name,
+                    alertType: alert.type,
+                }, settings);
+                await this.sendSMSNotification(user, alert, smsTemplate);
+            }
+
+            // Send Email
+            if (emailToggleKey && toggles[emailToggleKey] !== false) {
+                const emailTemplate = await emailTemplates.farmerStorageAlert(user, {
+                    ...data,
+                    message: alert.message,
+                    farmName: farm.name,
+                    alertType: alert.type,
+                    recommendation: alert.recommendation,
+                }, settings);
+                await this.sendEmailNotification(user, alert, emailTemplate);
+            }
+        } catch (error) {
+            logger.error(`Storage alert notification failed: ${error.message}`);
+        }
+    }
+
     async processSensorAlerts(farmId, fieldId, aiData) {
         if (aiData.risk_level === 'LOW') return;
 

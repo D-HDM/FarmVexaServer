@@ -38,6 +38,17 @@ const teamMemberAdded = async (user, data, settings) =>
 const marketInquirySMS = async (user, data, settings) =>
     `FarmVexa Market: New inquiry for ${data.productName} from ${data.buyerName}${data.buyerPhone ? ' (' + data.buyerPhone + ')' : ''}. ${data.message ? data.message.substring(0, 80) : ''}`;
 
+const farmerStorageAlert = async (user, data, settings) => {
+    const parts = [`${data.message}`, `${data.farmName || 'Your Farm'}`];
+    
+    if (data.temperature) parts.push(`Temp: ${data.temperature}°C`);
+    if (data.humidity) parts.push(`Humidity: ${data.humidity}%`);
+    if (data.co2) parts.push(`CO2: ${data.co2}ppm`);
+    if (data.recommendation) parts.push(data.recommendation);
+    
+    return parts.join('\n');
+};
+
 const adminNewFarmer = async (user, data, settings) =>
     `FARMVEXA: New farmer ${data.farmer?.name} (${data.farmer?.email}) pending. Review: ${process.env.ADMIN_URL}/approvals`;
 
@@ -52,7 +63,7 @@ const adminPythonOffline = async (user, data, settings) =>
 
 module.exports = {
     farmerApproved, farmerWelcome, farmerAlertHigh, farmerDiseaseDetected,
-    farmerDeviceOffline, farmerVaccinationDue, farmerLivestockAlert,
+    farmerDeviceOffline, farmerVaccinationDue, farmerLivestockAlert,farmerStorageAlert,
     farmerLowStock, farmerWeatherAlert, teamMemberAdded,marketInquirySMS,
     adminNewFarmer, adminSystemCritical, adminGeminiExceeded, adminPythonOffline,
 };

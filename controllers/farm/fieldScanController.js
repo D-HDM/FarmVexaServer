@@ -5,6 +5,7 @@ const FieldScan = require('../../models/farm/FieldScan');
 const Settings = require('../../models/admin/Settings');
 const Usage = require('../../models/admin/Usage');
 const emailService = require('../../services/emailService');
+const alertService = require('../../services/alertService');
 const User = require('../../models/farm/User');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -84,7 +85,6 @@ const startFieldScan = asyncHandler(async (req, res) => {
 
     const farmId = field.farm;
 
-    // Create scan record
     const scan = await FieldScan.create({
         user: req.user.id,
         farm: farmId,
@@ -141,12 +141,10 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
             preFilterPercentage || settings?.fieldScan?.preFilterPercentage || 60
         );
     } catch (aiError) {
-        // Mark scan as failed
         scan.status = 'failed';
         scan.errorMessage = aiError.message;
         await scan.save();
         
-        // Log failed usage
         await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiError.message });
         
         return errorResponse(res, aiError.message || 'Field scan analysis failed', 500);
@@ -180,6 +178,52 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     scan.summary = data.summary || {};
     scan.keyUsage = keyUsage;
     await scan.save();
+
+    // === CREATE ALERTS FOR DISEASES ===
+    if (scan.summary?.diseases?.length > 0) {
+        try {
+            const severityMap = {
+                low: 'low',
+                moderate: 'medium',
+                medium: 'medium',
+                high: 'high',
+                critical: 'critical',
+            };
+
+            // Deduplicate by disease name
+            const uniqueDiseases = [...new Set(scan.summary.diseases.map(d => d.name))];
+            
+            for (const diseaseName of uniqueDiseases) {
+                const diseaseInstances = scan.summary.diseases.filter(d => d.name === diseaseName);
+                
+                // Get highest severity
+                const severityOrder = { low: 0, moderate: 1, medium: 1, high: 2, critical: 3 };
+                const highestSeverity = diseaseInstances.reduce((max, d) => {
+                    return severityOrder[d.severity] > severityOrder[max] ? d.severity : max;
+                }, 'low');
+
+                await alertService.createAlert({
+                    farm: farmId,
+                    field: fieldId,
+                    type: 'disease_detected',
+                    severity: severityMap[highestSeverity] || 'medium',
+                    message: `${diseaseName} detected in field scan (${diseaseInstances.length} photos affected)`,
+                    recommendation: diseaseInstances[0]?.recommendation || 'Inspect affected areas and apply appropriate treatment.',
+                    data: {
+                        disease: diseaseName,
+                        count: diseaseInstances.length,
+                        cropType,
+                        scanId: scan._id,
+                        locations: diseaseInstances.map(d => d.location),
+                    },
+                });
+            }
+            
+            logger.info(`[Field Scan] Created ${uniqueDiseases.length} disease alerts for scan ${scan._id}`);
+        } catch (alertError) {
+            logger.error(`[Field Scan] Alert creation failed: ${alertError.message}`);
+        }
+    }
 
     // Log usage with full metadata
     const metadata = {

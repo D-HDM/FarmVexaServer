@@ -23,6 +23,10 @@ const emailToggleSchema = new mongoose.Schema({
     farmerReminderUpcoming: { type: Boolean, default: true },
     farmerReminderFinal: { type: Boolean, default: true },
     farmerFieldScanResults: { type: Boolean, default: true },
+    farmerStorageTempCritical: { type: Boolean, default: true },
+    farmerStorageHumidityCritical: { type: Boolean, default: true },
+    farmerStorageCo2Critical: { type: Boolean, default: true },
+    farmerStorageRatDetected: { type: Boolean, default: true },
     teamMemberAdded: { type: Boolean, default: true },
     adminNewFarmer: { type: Boolean, default: true },
     adminSystemCritical: { type: Boolean, default: true },
@@ -46,6 +50,10 @@ const smsToggleSchema = new mongoose.Schema({
     farmerLivestockAlert: { type: Boolean, default: true },
     farmerLowStock: { type: Boolean, default: true },
     farmerWeatherAlert: { type: Boolean, default: true },
+    farmerStorageTempCritical: { type: Boolean, default: true },
+    farmerStorageHumidityCritical: { type: Boolean, default: true },
+    farmerStorageCo2Critical: { type: Boolean, default: true },
+    farmerStorageRatDetected: { type: Boolean, default: true },
     teamMemberAdded: { type: Boolean, default: true },
     adminNewFarmer: { type: Boolean, default: true },
     adminSystemCritical: { type: Boolean, default: true },
@@ -67,12 +75,36 @@ const fieldScanSettingsSchema = new mongoose.Schema({
     preFilterPercentage: { type: Number, default: 60 },
     farmerLimits: { type: fieldScanLimitsSchema, default: () => ({}) },
     fieldLimits: { type: fieldScanLimitsSchema, default: () => ({}) },
-    allowedCropTypes: { type: [String], default: ['tomato','vegetable', 'maize', 'potato', 'bean', 'cassava', 'coffee', 'tea', 'wheat', 'rice','other'] },
+    allowedCropTypes: { type: [String], default: ['tomato', 'vegetable', 'maize', 'potato', 'bean', 'cassava', 'coffee', 'tea', 'wheat', 'rice', 'other'] },
     requireGpsAccuracy: { type: Number, default: 15 },
     preFilterEnabled: { type: Boolean, default: true },
     maxGeminiCallsPerScan: { type: Number, default: 30 },
-    minPhotoSize: { type: Number, default: 50 }, 
-    maxPhotoSize: { type: Number, default: 500 }, 
+    minPhotoSize: { type: Number, default: 50 },
+    maxPhotoSize: { type: Number, default: 500 },
+});
+
+const storageSettingsSchema = new mongoose.Schema({
+    enabled: { type: Boolean, default: true },
+    
+    // Temperature
+    tempWarning: { type: Number, default: 30 },      // °C
+    tempCritical: { type: Number, default: 35 },      // °C
+    
+    // Humidity
+    humidityWarning: { type: Number, default: 65 },   // %
+    humidityCritical: { type: Number, default: 75 },  // %
+    
+    // CO2 (Insect detection)
+    co2Warning: { type: Number, default: 800 },       // ppm
+    co2Critical: { type: Number, default: 1200 },     // ppm
+    
+    // PIR (Rat detection)
+    pirEnabled: { type: Boolean, default: true },
+    pirNightOnly: { type: Boolean, default: true },
+    pirAlertInterval: { type: Number, default: 2 },   // hours
+    
+    // Cooldown
+    cooldownHours: { type: Number, default: 6 },
 });
 
 const emailSettingsSchema = new mongoose.Schema({
@@ -123,7 +155,7 @@ const legalSchema = new mongoose.Schema({
 const weatherTestResultSchema = new mongoose.Schema({
     api: { type: String, enum: ['openweather', 'weatherapi'] },
     status: { type: String, enum: ['success', 'failed'] },
-    responseTime: { type: Number }, // ms
+    responseTime: { type: Number },
     data: { type: mongoose.Schema.Types.Mixed },
     error: { type: String },
     testedAt: { type: Date, default: Date.now },
@@ -161,6 +193,7 @@ const settingsSchema = new mongoose.Schema({
     emailToggles: { type: emailToggleSchema, default: () => ({}) },
     smsToggles: { type: smsToggleSchema, default: () => ({}) },
     fieldScan: { type: fieldScanSettingsSchema, default: () => ({}) },
+    storage: { type: storageSettingsSchema, default: () => ({}) },
     system: {
         appName: { type: String, default: 'FarmVexa' },
         supportPhone: { type: String, default: '+254700000000' },

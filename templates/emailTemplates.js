@@ -333,6 +333,39 @@ const farmerFieldScanResults = async (user, data, settings) => {
     };
 };
 
+// ============ FARMER — STORAGE ALERTS ============
+
+const farmerStorageAlert = async (user, data, settings) => {
+    const phone = settings?.system?.supportPhone || '+254700000000';
+    const email = settings?.system?.supportEmail || 'support@farmvexa.com';
+
+    const alertIcons = {
+        storage_temp_critical: '🌡️',
+        storage_humidity_critical: '💧',
+        storage_co2_critical: '🦠',
+        storage_rat_detected: '🐀',
+    };
+
+    const icon = alertIcons[data.alertType] || '⚠️';
+
+    return {
+        subject: `${icon} STORAGE ALERT — ${data.farmName || 'Your Farm'}`,
+        html: baseTemplate(`
+            <h2>${icon} Storage Alert</h2>
+            <div class="alert-high">
+                <strong>${data.message}</strong>
+            </div>
+            <div class="data-row"><span class="data-label">Farm:</span><span class="data-value">${data.farmName || 'N/A'}</span></div>
+            ${data.temperature !== undefined ? `<div class="data-row"><span class="data-label">Temperature:</span><span class="data-value">${data.temperature}°C</span></div>` : ''}
+            ${data.humidity !== undefined ? `<div class="data-row"><span class="data-label">Humidity:</span><span class="data-value">${data.humidity}%</span></div>` : ''}
+            ${data.co2 !== undefined ? `<div class="data-row"><span class="data-label">CO2:</span><span class="data-value">${data.co2}ppm</span></div>` : ''}
+            ${data.recommendation ? `<div class="data-row"><span class="data-label">Action:</span><span class="data-value">${data.recommendation}</span></div>` : ''}
+            <a href="${process.env.CLIENT_URL}/alerts" class="button">View Alerts</a>
+            <p style="margin-top:15px;font-size:13px;color:#777;">Need help? 📞 ${phone} | 📧 ${email}</p>
+        `, settings),
+    };
+};
+
 // ============ ADMIN ============
 
 const adminNewFarmer = async (user, data, settings) => ({
@@ -370,7 +403,7 @@ module.exports = {
     farmerVaccinationDue, farmerLivestockAlert, farmerLowStock,
     farmerMaintenanceDue, farmerWeatherAlert, farmerTaskOverdue,
     farmerFieldScanResults,
-    teamMemberAdded,
+    teamMemberAdded,farmerStorageAlert,
     adminNewFarmer, adminSystemCritical, adminGeminiEightyPercent,
     adminGeminiExceeded, adminPythonOffline, adminDeviceOffline24h,
     adminTrainingComplete, adminNewAdmin, adminWeeklyReport,

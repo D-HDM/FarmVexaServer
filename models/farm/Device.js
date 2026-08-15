@@ -10,11 +10,22 @@ const deviceSchema = new mongoose.Schema({
     field: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Field',
+        required: false,  // Made optional for storage devices
     },
     farm: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Farm',
         required: true,
+    },
+    zone: {
+        type: String,
+        enum: ['field', 'storage', 'greenhouse', 'livestock'],
+        default: 'field',
+    },
+    sensorType: {
+        type: String,
+        enum: ['dht', 'soil', 'co2', 'pir', 'acoustic', 'camera', 'weight'],
+        default: 'dht',
     },
     status: {
         type: String,
