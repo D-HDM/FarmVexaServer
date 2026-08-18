@@ -2,6 +2,7 @@ const Settings = require('../../models/admin/Settings');
 const PaymentMethod = require('../../models/admin/PaymentMethod');
 const PaymentModel = require('../../models/admin/PaymentModel');
 const Admin = require('../../models/admin/Admin');
+const Document = require('../../models/admin/Document');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
@@ -151,4 +152,15 @@ const getChatbotSettings = asyncHandler(async (req, res) => {
     });
 });
 
-module.exports = { getPublicSettings, checkAdminExists, createFirstAdmin, getChatbotSettings };
+const getPublicDocuments = asyncHandler(async (req, res) => {
+    const { type } = req.query;
+    const filter = { enabled: true, visibility: { $in: ['public', 'farmer'] } };
+    if (type) filter.type = type;
+
+    const documents = await Document.find(filter)
+        .select('name type cloudinaryUrl fileType fileSize version platform')
+        .sort({ createdAt: -1 });
+    return successResponse(res, { documents });
+});
+
+module.exports = { getPublicSettings, checkAdminExists, createFirstAdmin, getChatbotSettings,getPublicDocuments };

@@ -15,5 +15,9 @@ router.use('/payment-models', require('./paymentModelsRoutes'));
 router.use('/weather-test', require('./weatherTestRoutes'));
 router.use('/backups', require('./backupRoutes'));
 router.use('/market', require('./marketRoutes'));
+router.use('/documents', require('./documentRoutes'));
+router.use('/payments', require('./paymentRecordsRoutes'));
+router.use('/renewals', require('./renewalRoutes'));
+router.use('/plans', require('./planRoutes'));
 
 module.exports = router;

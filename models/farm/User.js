@@ -62,12 +62,91 @@ const userSchema = new mongoose.Schema({
     },
     rejectedAt: Date,
     rejectionReason: String,
+    
+    // === SUBSCRIPTION + PLAN FIELDS ===
+    selectedPlan: {
+        type: String,
+        enum: ['Basic', 'Basic Monthly', 'Pro', 'Full Suite'],
+        default: 'Basic',
+    },
+    planInterval: {
+        type: String,
+        enum: ['one_time', 'monthly'],
+        default: 'one_time',
+    },
+    planPrice: {
+        type: Number,
+        default: 0,
+    },
+    paymentStatus: {
+        type: String,
+        enum: ['pending_verification', 'paid', 'unpaid', 'failed'],
+        default: 'unpaid',
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['mpesa_stk', 'mpesa_send_money', 'mpesa_till', 'mpesa_paybill', 'bank', 'card', 'manual', null],
+        default: null,
+    },
+    paymentReference: {
+        type: String,
+        default: null,
+    },
+    paymentDate: Date,
+    
+    // === SUBSCRIPTION LIFECYCLE ===
+    subscriptionExpiry: {
+        type: Date,
+        default: null, // null = lifetime (one-time plans)
+    },
+    subscriptionStatus: {
+        type: String,
+        enum: ['active', 'expired', 'pending_renewal', 'cancelled'],
+        default: 'active',
+    },
+    lastRenewalDate: Date,
+    renewalCount: {
+        type: Number,
+        default: 0,
+    },
+    subscriptionStartDate: {
+        type: Date,
+        default: null,
+    },
+    lastRenewalReminder: Date, 
+    
     resetPasswordToken: String,
     resetPasswordExpire: Date,
     lastLogin: Date,
 }, {
     timestamps: true,
 });
+
+
+userSchema.methods.activateSubscription = function (durationDays = 30) {
+    this.subscriptionStartDate = new Date();
+    this.subscriptionExpiry = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+    this.subscriptionStatus = 'active';
+    return this.save();
+};
+
+
+userSchema.methods.renewSubscription = function (durationDays = 30) {
+    const baseDate = this.subscriptionExpiry && new Date() < new Date(this.subscriptionExpiry)
+        ? new Date(this.subscriptionExpiry)
+        : new Date();
+    this.subscriptionExpiry = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+    this.subscriptionStatus = 'active';
+    this.lastRenewalDate = new Date();
+    this.renewalCount += 1;
+    return this.save();
+};
+
+
+userSchema.methods.isSubscriptionExpired = function () {
+    if (!this.subscriptionExpiry) return false; // Lifetime
+    return new Date() > new Date(this.subscriptionExpiry);
+};
 
 userSchema.pre('save', async function (next) {
     if (!this.isModified('password')) return next();

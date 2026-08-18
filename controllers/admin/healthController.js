@@ -73,7 +73,7 @@ const getSystemHealth = asyncHandler(async (req, res) => {
             status: aiHealth?.status || 'offline',
             server: aiHealth?.server || {},
             ai: aiHealth?.ai || {},
-            mernConnected: aiHealth?.mern_server?.connected || false,
+            mernConnected: aiHealth?.mernConnected || false,  // ← FIXED
             url: process.env.PYTHON_AI_URL || 'N/A',
         },
         cors: {

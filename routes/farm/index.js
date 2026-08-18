@@ -24,5 +24,7 @@ router.use('/weather', require('./weatherRoutes'));
 router.use('/reports', require('./reportRoutes'));
 router.use('/stock', require('./stockRoutes'));
 router.use('/market', require('./marketRoutes'));
+router.use('/renewal', require('./renewalRoutes'));
+router.use('/plans', require('./planRoutes'));
 
 module.exports = router;

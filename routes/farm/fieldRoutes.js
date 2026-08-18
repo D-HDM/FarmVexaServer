@@ -1,9 +1,11 @@
 const router = require('express').Router();
 const { createField, getFarmFields, getFieldById, updateField, deleteField } = require('../../controllers/farm/fieldController');
 const farmerAuth = require('../../middleware/farm/auth');
+const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 const { ownsFarm, ownsField } = require('../../middleware/farm/farm');
 
 router.use(farmerAuth);
+router.use(subscriptionCheck);
 
 router.post('/farm/:farmId', ownsFarm, createField);
 router.get('/farm/:farmId', ownsFarm, getFarmFields);

@@ -1,5 +1,6 @@
 const User = require('../../models/farm/User');
 const PendingApproval = require('../../models/admin/PendingApproval');
+const PaymentRecord = require('../../models/admin/PaymentRecord');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const { successResponse, errorResponse } = require('../../utils/response');
@@ -9,15 +10,23 @@ const getPendingApprovals = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
 
     const approvals = await PendingApproval.find({ status: 'pending' })
-        .populate('user', 'name email phone county subCounty createdAt')
+        .populate('user', 'name email phone county subCounty createdAt selectedPlan planInterval planPrice paymentStatus paymentMethod paymentReference')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
-        .limit(parseInt(limit));
+        .limit(parseInt(limit))
+        .lean();
+
+    const approvalsWithPayment = await Promise.all(
+        approvals.map(async (approval) => {
+            const payment = await PaymentRecord.findOne({ user: approval.user?._id }).sort({ createdAt: -1 }).lean();
+            return { ...approval, payment };
+        })
+    );
 
     const total = await PendingApproval.countDocuments({ status: 'pending' });
 
     return successResponse(res, {
-        approvals,
+        approvals: approvalsWithPayment,
         pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -41,8 +50,32 @@ const approveUser = asyncHandler(async (req, res) => {
     user.isActive = true;
     user.approvedBy = req.user.id;
     user.approvedAt = new Date();
+    user.paymentStatus = 'paid';
     user.rejectionReason = undefined;
+
+    // === SUBSCRIPTION ACTIVATION ===
+    if (user.planInterval === 'monthly') {
+        // Monthly plan — activate 30 days
+        user.subscriptionStartDate = new Date();
+        user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        user.subscriptionStatus = 'active';
+    } else {
+        // One-time plan — lifetime
+        user.subscriptionStartDate = new Date();
+        user.subscriptionExpiry = null;
+        user.subscriptionStatus = 'active';
+    }
+
     await user.save();
+
+    // Update payment record
+    const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 });
+    if (payment) {
+        payment.status = 'completed';
+        payment.verifiedBy = req.user.id;
+        payment.verifiedAt = new Date();
+        await payment.save();
+    }
 
     let approval = await PendingApproval.findOne({ user: user._id });
     if (!approval) {
@@ -55,12 +88,32 @@ const approveUser = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    emailService.send(user.email, 'farmerApproved', { user }).catch(() => {});
+    // Send emails with plan + expiry info
+    emailService.send(user.email, 'farmerApproved', {
+        user,
+        planName: user.selectedPlan || 'N/A',
+        subscriptionExpiry: user.subscriptionExpiry,
+    }).catch(() => {});
+    
     if (user.phone) {
-        smsService.send(user.phone, 'farmerApproved', { user }).catch(() => {});
+        smsService.send(user.phone, 'farmerApproved', {
+            user,
+            planName: user.selectedPlan || 'N/A',
+            subscriptionExpiry: user.subscriptionExpiry,
+        }).catch(() => {});
     }
 
-    return successResponse(res, { user: { id: user._id, name: user.name, email: user.email, approvalStatus: user.approvalStatus } }, 'User approved');
+    return successResponse(res, {
+        user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            approvalStatus: user.approvalStatus,
+            selectedPlan: user.selectedPlan,
+            subscriptionExpiry: user.subscriptionExpiry,
+            subscriptionStatus: user.subscriptionStatus,
+        },
+    }, 'User approved');
 });
 
 const rejectUser = asyncHandler(async (req, res) => {
@@ -84,7 +137,16 @@ const rejectUser = asyncHandler(async (req, res) => {
     user.rejectedBy = req.user.id;
     user.rejectedAt = new Date();
     user.rejectionReason = reason;
+    user.subscriptionStatus = 'cancelled';
     await user.save();
+
+    const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 });
+    if (payment) {
+        payment.status = 'failed';
+        payment.verifiedBy = req.user.id;
+        payment.verifiedAt = new Date();
+        await payment.save();
+    }
 
     let approval = await PendingApproval.findOne({ user: user._id });
     if (!approval) {
@@ -98,26 +160,45 @@ const rejectUser = asyncHandler(async (req, res) => {
     await approval.save();
 
     emailService.send(user.email, 'farmerRejected', { user, reason }).catch(() => {});
+    if (user.phone) {
+        smsService.send(user.phone, 'farmerRejected', { user, reason }).catch(() => {});
+    }
 
-    return successResponse(res, { user: { id: user._id, name: user.name, email: user.email, approvalStatus: user.approvalStatus } }, 'User rejected');
+    return successResponse(res, {
+        user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            approvalStatus: user.approvalStatus,
+        },
+    }, 'User rejected');
 });
 
 const getApprovalHistory = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, type } = req.query;
     const query = {};
     if (status) query.status = status;
+    if (type) query.type = type;
 
     const approvals = await PendingApproval.find(query)
-        .populate('user', 'name email phone')
+        .populate('user', 'name email phone selectedPlan paymentStatus subscriptionExpiry')
         .populate('reviewedBy', 'name email')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
-        .limit(parseInt(limit));
+        .limit(parseInt(limit))
+        .lean();
+
+    const approvalsWithPayment = await Promise.all(
+        approvals.map(async (approval) => {
+            const payment = await PaymentRecord.findOne({ user: approval.user?._id }).sort({ createdAt: -1 }).lean();
+            return { ...approval, payment };
+        })
+    );
 
     const total = await PendingApproval.countDocuments(query);
 
     return successResponse(res, {
-        approvals,
+        approvals: approvalsWithPayment,
         pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) },
     });
 });

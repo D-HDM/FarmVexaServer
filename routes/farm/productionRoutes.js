@@ -1,10 +1,12 @@
 const router = require('express').Router();
 const { getRecords, getRecord, addRecord, updateRecord, deleteRecord, getProductionSummary } = require('../../controllers/farm/productionController');
 const farmerAuth = require('../../middleware/farm/auth');
+const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 const { ownsFarm } = require('../../middleware/farm/farm');
 const { canRecordProduction } = require('../../middleware/farm/farmRole');
 
 router.use(farmerAuth);
+router.use(subscriptionCheck);
 
 router.get('/farm/:farmId', ownsFarm, getRecords);
 router.get('/farm/:farmId/summary', ownsFarm, getProductionSummary);

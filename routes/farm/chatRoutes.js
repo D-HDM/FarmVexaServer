@@ -9,8 +9,10 @@ const {
     clearAllChats,
 } = require('../../controllers/farm/chatController');
 const farmerAuth = require('../../middleware/farm/auth');
+const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 
 router.use(farmerAuth);
+router.use(subscriptionCheck);
 
 router.post('/', startChat);
 router.get('/', getMyChats);

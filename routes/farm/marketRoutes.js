@@ -5,9 +5,11 @@ const {
     getMyInquiries, markInquiryRead, deleteInquiry, uploadMarketImage,
 } = require('../../controllers/farm/marketController');
 const farmerAuth = require('../../middleware/farm/auth');
+const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 const upload = require('../../middleware/global/upload');
 
 router.use(farmerAuth);
+router.use(subscriptionCheck);
 
 router.get('/status', isMarketEnabled);
 router.get('/products', getMyProducts);

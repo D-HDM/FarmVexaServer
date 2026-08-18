@@ -16,11 +16,25 @@ const upload = multer({
     storage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-        if (allowedTypes.includes(file.mimetype)) {
+        const allowedMimes = [
+            // Images
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            // Documents
+            'application/pdf',
+            'text/html',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ];
+
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.html', '.htm', '.doc', '.docx'];
+        const ext = path.extname(file.originalname).toLowerCase();
+
+        if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
             cb(null, true);
         } else {
-            cb(new Error('Only image files are allowed'), false);
+            cb(new Error('Only image (JPG, PNG, WEBP) or document (PDF, HTML, DOC, DOCX) files are allowed'), false);
         }
     },
 });

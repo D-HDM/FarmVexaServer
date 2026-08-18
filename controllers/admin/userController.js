@@ -1,5 +1,6 @@
 const User = require('../../models/farm/User');
 const Farm = require('../../models/farm/Farm');
+const PaymentRecord = require('../../models/admin/PaymentRecord');
 const emailService = require('../../services/emailService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -21,17 +22,18 @@ const getAllUsers = asyncHandler(async (req, res) => {
         .limit(parseInt(limit))
         .lean();
 
-    const usersWithFarms = await Promise.all(
+    const usersWithDetails = await Promise.all(
         users.map(async (user) => {
             const farmCount = await Farm.countDocuments({ owner: user._id });
-            return { ...user, farmCount };
+            const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 }).lean();
+            return { ...user, farmCount, payment: payment ? { plan: payment.plan, amount: payment.amount, status: payment.status, methodType: payment.methodType, reference: payment.reference } : null };
         })
     );
 
     const total = await User.countDocuments(query);
 
     return successResponse(res, {
-        users: usersWithFarms,
+        users: usersWithDetails,
         pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -42,14 +44,15 @@ const getAllUsers = asyncHandler(async (req, res) => {
 });
 
 const getUserById = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.params.id).select('-password');
+    const user = await User.findById(req.params.id).select('-password').lean();
     if (!user) {
         return errorResponse(res, 'User not found', 404);
     }
 
     const farms = await Farm.find({ owner: user._id });
+    const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 }).lean();
 
-    return successResponse(res, { user, farms });
+    return successResponse(res, { user, farms, payment });
 });
 
 const toggleUserStatus = asyncHandler(async (req, res) => {
@@ -71,6 +74,7 @@ const deleteUser = asyncHandler(async (req, res) => {
     }
 
     await Farm.deleteMany({ owner: user._id });
+    await PaymentRecord.deleteMany({ user: user._id });
 
     return successResponse(res, null, 'User and associated farms deleted');
 });

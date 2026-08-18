@@ -1,11 +1,15 @@
 const router = require('express').Router();
-const { getReport } = require('../../controllers/farm/reportController');
+const {
+    getPlans,
+    submitUpgrade,
+} = require('../../controllers/farm/planController');
 const farmerAuth = require('../../middleware/farm/auth');
 const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
-const { ownsFarm } = require('../../middleware/farm/farm');
 
 router.use(farmerAuth);
 router.use(subscriptionCheck);
-router.get('/farm/:farmId', ownsFarm, getReport);
+
+router.get('/', getPlans);
+router.post('/upgrade', submitUpgrade);
 
 module.exports = router;

@@ -1,10 +1,12 @@
 const router = require('express').Router();
 const { getItems, getItem, addItem, updateItem, stockIn, stockOut, deleteItem } = require('../../controllers/farm/inventoryController');
 const farmerAuth = require('../../middleware/farm/auth');
+const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 const { ownsFarm } = require('../../middleware/farm/farm');
 const { canManageInventory } = require('../../middleware/farm/farmRole');
 
 router.use(farmerAuth);
+router.use(subscriptionCheck);
 
 router.get('/farm/:farmId', ownsFarm, getItems);
 router.get('/:id', getItem);
