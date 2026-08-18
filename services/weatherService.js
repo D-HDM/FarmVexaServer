@@ -81,9 +81,15 @@ class WeatherService {
             params: { lat, lon, appid: this.openWeatherKey, units: 'metric' },
         });
         const d = res.data;
+        
+        // Better rain detection — check 1h and 3h
+        const rain1h = d.rain?.['1h'] || 0;
+        const rain3h = d.rain?.['3h'] || 0;
+        const rain = Math.max(rain1h, rain3h / 3);
+        
         return {
             temp: d.main.temp, humidity: d.main.humidity,
-            rainfall: d.rain ? (d.rain['1h'] || 0) : 0,
+            rainfall: rain,
             windSpeed: d.wind.speed * 3.6,
             condition: this.mapCondition(d.weather[0]?.main),
         };
@@ -111,18 +117,37 @@ class WeatherService {
         const tempMax = Math.max(...forecast.map((f) => f.tempMax));
         const todayForecast = forecast[0];
 
+        // Determine effective condition
+        const totalRain = current.rainfall || todayForecast?.rainfall || 0;
+        let condition = current.condition;
+
+        // Override condition to rainy if significant rain
+        if (totalRain > 2 && !condition.includes('rain') && !condition.includes('storm')) {
+            condition = 'rainy';
+        }
+
+        // If forecast says rainy with rain, prefer forecast condition
+        if (todayForecast?.rainfall > 2 && todayForecast?.condition === 'rainy') {
+            condition = 'rainy';
+        }
+
+        // If forecast says stormy, override
+        if (todayForecast?.condition === 'stormy') {
+            condition = 'stormy';
+        }
+
         const weather = await Weather.findOneAndUpdate(
             { farm: farmId, date: today },
             {
                 farm: farmId, date: today,
                 temperature: { min: tempMin, max: tempMax, avg: (current.temp + todayForecast?.tempMax + todayForecast?.tempMin) / 3 },
-                humidity: current.humidity, rainfall: current.rainfall || todayForecast?.rainfall || 0,
-                windSpeed: current.windSpeed, condition: current.condition,
+                humidity: current.humidity, rainfall: totalRain,
+                windSpeed: current.windSpeed, condition: condition,
                 forecast: forecast.map((f) => ({
                     date: f.date, tempMin: f.tempMin, tempMax: f.tempMax,
                     condition: f.condition, rainfall: f.rainfall, humidity: f.humidity, windSpeed: f.windSpeed,
                 })),
-                alerts: this.generateAlerts(current, forecast),
+                alerts: this.generateAlerts({ ...current, condition }, forecast),
                 source: 'api',
             },
             { upsert: true, new: true },
