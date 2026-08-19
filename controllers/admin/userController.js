@@ -1,7 +1,29 @@
 const User = require('../../models/farm/User');
 const Farm = require('../../models/farm/Farm');
+const Field = require('../../models/farm/Field');
+const Crop = require('../../models/farm/Crop');
+const CropImage = require('../../models/farm/CropImage');
+const Animal = require('../../models/farm/Animal');
+const HealthRecord = require('../../models/farm/HealthRecord');
+const ProductionRecord = require('../../models/farm/ProductionRecord');
+const Stock = require('../../models/farm/Stock');
+const Inventory = require('../../models/farm/Inventory');
+const Equipment = require('../../models/farm/Equipment');
+const Transaction = require('../../models/farm/Transaction');
+const ProductPrice = require('../../models/farm/ProductPrice');
+const Task = require('../../models/farm/Task');
+const TeamMember = require('../../models/farm/TeamMember');
+const Alert = require('../../models/farm/Alert');
+const Chat = require('../../models/farm/Chat');
+const Device = require('../../models/farm/Device');
+const SensorReading = require('../../models/farm/SensorReading');
+const FieldScan = require('../../models/farm/FieldScan');
+const Weather = require('../../models/farm/Weather');
+const MarketProduct = require('../../models/farm/MarketProduct');
+const MarketInquiry = require('../../models/farm/MarketInquiry');
+const NotificationLog = require('../../models/farm/NotificationLog');
 const PaymentRecord = require('../../models/admin/PaymentRecord');
-const emailService = require('../../services/emailService');
+const PendingApproval = require('../../models/admin/PendingApproval');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
@@ -68,15 +90,53 @@ const toggleUserStatus = asyncHandler(async (req, res) => {
 });
 
 const deleteUser = asyncHandler(async (req, res) => {
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) {
-        return errorResponse(res, 'User not found', 404);
+    const user = await User.findById(req.params.id);
+    if (!user) return errorResponse(res, 'User not found', 404);
+
+    const farms = await Farm.find({ owner: user._id }).select('_id').lean();
+    const farmIds = farms.map(f => f._id);
+
+    const fields = await Field.find({ farm: { $in: farmIds } }).select('_id').lean();
+    const fieldIds = fields.map(f => f._id);
+
+    const devices = await Device.find({ farm: { $in: farmIds } }).select('_id').lean();
+    const deviceIds = devices.map(d => d._id);
+
+    if (farmIds.length > 0) {
+        await Crop.deleteMany({ field: { $in: fieldIds } });
+        await CropImage.deleteMany({ field: { $in: fieldIds } });
+        await Animal.deleteMany({ farm: { $in: farmIds } });
+        await HealthRecord.deleteMany({ farm: { $in: farmIds } });
+        await ProductionRecord.deleteMany({ farm: { $in: farmIds } });
+        await Stock.deleteMany({ farm: { $in: farmIds } });
+        await Inventory.deleteMany({ farm: { $in: farmIds } });
+        await Equipment.deleteMany({ farm: { $in: farmIds } });
+        await Transaction.deleteMany({ farm: { $in: farmIds } });
+        await ProductPrice.deleteMany({ farm: { $in: farmIds } });
+        await Task.deleteMany({ farm: { $in: farmIds } });
+        await TeamMember.deleteMany({ farm: { $in: farmIds } });
+        await Alert.deleteMany({ farm: { $in: farmIds } });
+        await Device.deleteMany({ farm: { $in: farmIds } });
+        await Weather.deleteMany({ farm: { $in: farmIds } });
+        await MarketProduct.deleteMany({ farm: { $in: farmIds } });
+        await MarketInquiry.deleteMany({ product: { $in: await MarketProduct.find({ farm: { $in: farmIds } }).distinct('_id') } });
+        await Farm.deleteMany({ owner: user._id });
     }
 
-    await Farm.deleteMany({ owner: user._id });
-    await PaymentRecord.deleteMany({ user: user._id });
+    if (deviceIds.length > 0) {
+        await SensorReading.deleteMany({ device: { $in: deviceIds } });
+    }
 
-    return successResponse(res, null, 'User and associated farms deleted');
+    await FieldScan.deleteMany({ user: user._id });
+    await Chat.deleteMany({ user: user._id });
+    await TeamMember.deleteMany({ user: user._id });
+    await NotificationLog.deleteMany({ user: user._id });
+    await PaymentRecord.deleteMany({ user: user._id });
+    await PendingApproval.deleteMany({ user: user._id });
+
+    await User.findByIdAndDelete(user._id);
+
+    return successResponse(res, null, 'User and all associated data deleted');
 });
 
 module.exports = {
