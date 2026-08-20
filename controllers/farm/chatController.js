@@ -16,6 +16,15 @@ const getFarmId = async (user) => {
     return member?.farm;
 };
 
+const getFarmContextForUser = async (user, farmId) => {
+    if (user.role === 'farmer') {
+        // Farmers get ALL farms context
+        return aiContextService.getAllFarmsContext(user.id);
+    }
+    // Team members get only their assigned farm
+    return farmId ? aiContextService.getFarmContext(farmId) : null;
+};
+
 const startChat = asyncHandler(async (req, res) => {
     const { message, title } = req.body;
     if (!message) return errorResponse(res, 'Message is required', 400);
@@ -25,7 +34,7 @@ const startChat = asyncHandler(async (req, res) => {
     if (!limitCheck.allowed) return errorResponse(res, limitCheck.reason, 429);
 
     const systemContext = await aiContextService.getSystemContext();
-    const farmContext = farmId ? await aiContextService.getFarmContext(farmId) : null;
+    const farmContext = await getFarmContextForUser(req.user, farmId);
     const systemPrompt = aiContextService.buildSystemPrompt(systemContext, farmContext);
 
     const aiResult = await aiService.farmerChat(message, systemPrompt);
@@ -58,7 +67,7 @@ const sendMessage = asyncHandler(async (req, res) => {
     if (!chat) return errorResponse(res, 'Chat not found', 404);
 
     const systemContext = await aiContextService.getSystemContext();
-    const farmContext = farmId ? await aiContextService.getFarmContext(farmId) : null;
+    const farmContext = await getFarmContextForUser(req.user, farmId);
     const systemPrompt = aiContextService.buildSystemPrompt(systemContext, farmContext);
 
     chat.messages.push({ role: 'user', content: message });
