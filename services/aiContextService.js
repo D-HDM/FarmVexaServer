@@ -4,6 +4,7 @@ const ProductionRecord = require('../models/farm/ProductionRecord');
 const Stock = require('../models/farm/Stock');
 const Alert = require('../models/farm/Alert');
 const Device = require('../models/farm/Device');
+const VirtualDevice = require('../models/farm/VirtualDevice');
 const weatherService = require('./weatherService');
 const Settings = require('../models/admin/Settings');
 const logger = require('../utils/logger');
@@ -58,12 +59,13 @@ class AIContextService {
         const farmId = farm._id;
         const today = new Date(); today.setHours(0, 0, 0, 0);
 
-        const [animals, todayProd, stock, alerts, devices, weather] = await Promise.all([
+        const [animals, todayProd, stock, alerts, physicalDevices, virtualDevices, weather] = await Promise.all([
             Animal.find({ farm: farmId, status: 'active' }),
             ProductionRecord.find({ farm: farmId, date: { $gte: today } }),
             Stock.find({ farm: farmId }),
             Alert.find({ farm: farmId, isRead: false, severity: { $in: ['high', 'critical'] } }).limit(5),
             Device.find({ farm: farmId }),
+            VirtualDevice.find({ farm: farmId }),
             weatherService.getFarmWeather(farmId).catch(() => null),
         ]);
 
@@ -80,7 +82,30 @@ class AIContextService {
 
         const alertSummary = alerts.map((a) => `[${a.severity.toUpperCase()}] ${a.message}`);
 
-        const onlineDevices = devices.filter((d) => d.status === 'online').length;
+        // Combine physical + virtual devices
+        const allDevices = [
+            ...physicalDevices.map((d) => ({
+                name: d.deviceId,
+                type: 'physical',
+                zone: d.zone || 'field',
+                sensorType: d.sensorType || 'dht',
+                status: d.status,
+            })),
+            ...virtualDevices.map((v) => ({
+                name: v.name || 'FarmVexa Virtual',
+                type: 'virtual',
+                zone: v.zone || 'field',
+                sensorType: v.sensorType || 'dht',
+                status: v.status,
+            })),
+        ];
+
+        const onlineDevices = allDevices.filter((d) => d.status === 'online').length;
+        const physicalOnline = physicalDevices.filter((d) => d.status === 'online').length;
+        const virtualOnline = virtualDevices.filter((v) => v.status === 'online').length;
+
+        // Device names for AI
+        const deviceNames = allDevices.map((d) => `${d.name} (${d.type}${d.zone ? ', ' + d.zone : ''})`);
 
         return {
             farmName: farm.name,
@@ -93,7 +118,15 @@ class AIContextService {
             productionToday: { milk, eggs },
             stock: stockSummary,
             alerts: alertSummary,
-            devices: { total: devices.length, online: onlineDevices },
+            devices: {
+                total: allDevices.length,
+                online: onlineDevices,
+                physical: physicalDevices.length,
+                physicalOnline,
+                virtual: virtualDevices.length,
+                virtualOnline,
+                deviceNames,
+            },
             weather: weather ? {
                 condition: weather.condition,
                 temperature: weather.temperature?.avg?.toFixed(1) || weather.temperature?.max,
@@ -113,7 +146,6 @@ class AIContextService {
         if (systemContext.whatsappNumber) prompt += `WhatsApp: ${systemContext.whatsappNumber}\n`;
 
         if (farmContext) {
-            // Check if multiple farms
             const farmsList = Array.isArray(farmContext) ? farmContext : [farmContext];
 
             prompt += `\nFARM CONTEXT (${farmsList.length} farm${farmsList.length > 1 ? 's' : ''}):\n`;
@@ -145,7 +177,14 @@ class AIContextService {
                     prompt += `Active Alerts: ${farm.alerts.join('; ')}\n`;
                 }
 
-                prompt += `Devices: ${farm.devices.online}/${farm.devices.total} online\n`;
+                // Devices info
+                prompt += `Devices: ${farm.devices.online}/${farm.devices.total} online (`;
+                prompt += `${farm.devices.physical} physical, ${farm.devices.virtual} virtual`;
+                prompt += `)\n`;
+                
+                if (farm.devices.deviceNames.length > 0) {
+                    prompt += `Device List: ${farm.devices.deviceNames.join('; ')}\n`;
+                }
 
                 if (farm.weather) {
                     prompt += `Weather: ${farm.weather.condition}, ${farm.weather.temperature}°C, Humidity: ${farm.weather.humidity}%\n`;
