@@ -85,26 +85,56 @@ const fieldScanSettingsSchema = new mongoose.Schema({
 
 const storageSettingsSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: true },
-    
-    // Temperature
-    tempWarning: { type: Number, default: 30 },      // °C
-    tempCritical: { type: Number, default: 35 },      // °C
-    
-    // Humidity
-    humidityWarning: { type: Number, default: 65 },   // %
-    humidityCritical: { type: Number, default: 75 },  // %
-    
-    // CO2 (Insect detection)
-    co2Warning: { type: Number, default: 800 },       // ppm
-    co2Critical: { type: Number, default: 1200 },     // ppm
-    
-    // PIR (Rat detection)
+    tempWarning: { type: Number, default: 30 },
+    tempCritical: { type: Number, default: 35 },
+    humidityWarning: { type: Number, default: 65 },
+    humidityCritical: { type: Number, default: 75 },
+    co2Warning: { type: Number, default: 800 },
+    co2Critical: { type: Number, default: 1200 },
     pirEnabled: { type: Boolean, default: true },
     pirNightOnly: { type: Boolean, default: true },
-    pirAlertInterval: { type: Number, default: 2 },   // hours
-    
-    // Cooldown
+    pirAlertInterval: { type: Number, default: 2 },
     cooldownHours: { type: Number, default: 6 },
+});
+
+const virtualDeviceReadingsSchema = new mongoose.Schema({
+    temperature: {
+        enabled: { type: Boolean, default: true },
+        source: { type: String, default: 'weather' },
+    },
+    humidity: {
+        enabled: { type: Boolean, default: true },
+        source: { type: String, default: 'weather' },
+    },
+    soilMoisture: {
+        enabled: { type: Boolean, default: true },
+        source: { type: String, default: 'rainfall_estimate' },
+    },
+    lightLevel: {
+        enabled: { type: Boolean, default: true },
+        source: { type: String, default: 'time_of_day' },
+    },
+    co2: {
+        enabled: { type: Boolean, default: false },
+        source: { type: String, default: 'baseline' },
+    },
+    motion: {
+        enabled: { type: Boolean, default: false },
+        source: { type: String, default: 'fixed_false' },
+    },
+});
+
+const virtualDeviceSettingsSchema = new mongoose.Schema({
+    enabled: { type: Boolean, default: false },
+    name: { type: String, default: 'FarmVexa Virtual' },
+    intervalMinutes: { type: Number, default: 60 },
+    showForPlans: {
+        'Basic': { type: Boolean, default: false },
+        'Basic Monthly': { type: Boolean, default: false },
+        'Pro': { type: Boolean, default: true },
+        'Full Suite': { type: Boolean, default: true },
+    },
+    readings: { type: virtualDeviceReadingsSchema, default: () => ({}) },
 });
 
 const emailSettingsSchema = new mongoose.Schema({
@@ -194,6 +224,7 @@ const settingsSchema = new mongoose.Schema({
     smsToggles: { type: smsToggleSchema, default: () => ({}) },
     fieldScan: { type: fieldScanSettingsSchema, default: () => ({}) },
     storage: { type: storageSettingsSchema, default: () => ({}) },
+    virtualDevice: { type: virtualDeviceSettingsSchema, default: () => ({}) },
     system: {
         appName: { type: String, default: 'FarmVexa' },
         supportPhone: { type: String, default: '+254700000000' },

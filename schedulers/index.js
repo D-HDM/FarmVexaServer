@@ -8,6 +8,7 @@ const dailyBriefingScheduler = require('./dailyBriefingScheduler');
 const reminderScheduler = require('./reminderScheduler');
 const backupScheduler = require('./backupScheduler');
 const subscriptionScheduler = require('./subscriptionScheduler');
+const virtualDeviceScheduler = require('./virtualDeviceScheduler');
 const logger = require('../utils/logger');
 
 
@@ -22,6 +23,7 @@ const startSchedulers = () => {
     reminderScheduler.start();
     backupScheduler.start();
     subscriptionScheduler.start();
+    virtualDeviceScheduler.start();
     logger.info('✅ All schedulers started');
 };
 
@@ -35,6 +37,7 @@ const stopSchedulers = () => {
     reminderScheduler.stop();
     backupScheduler.stop();
     subscriptionScheduler.stop();
+    virtualDeviceScheduler.stop();
     logger.info('🛑 All schedulers stopped');
 };
 
