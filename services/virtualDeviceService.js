@@ -9,20 +9,34 @@ const logger = require('../utils/logger');
 
 class VirtualDeviceService {
 
-    calculateLightLevel() {
+    calculateLightLevel(weatherCondition) {
         const now = new Date();
         const hour = now.getHours();
 
+        // Base light by time of day
+        let baseLight = 0;
+
         if (hour >= 19 || hour < 6) {
-            return Math.floor(Math.random() * 10); // Night: 0-10
+            baseLight = Math.floor(Math.random() * 10); // Night: 0-10
         } else if (hour >= 6 && hour < 9) {
-            return 20 + Math.floor(Math.random() * 30); // Morning: 20-50
+            baseLight = 20 + Math.floor(Math.random() * 30); // Morning: 20-50
         } else if (hour >= 9 && hour < 15) {
-            return 60 + Math.floor(Math.random() * 30); // Afternoon: 60-90
+            baseLight = 60 + Math.floor(Math.random() * 30); // Afternoon: 60-90
         } else if (hour >= 15 && hour < 19) {
-            return 30 + Math.floor(Math.random() * 30); // Evening: 30-60
+            baseLight = 30 + Math.floor(Math.random() * 30); // Evening: 30-60
         }
-        return 50;
+
+        // Reduce for cloudy/rainy conditions
+        const condition = weatherCondition?.toLowerCase() || '';
+        if (condition.includes('rain') || condition.includes('storm')) {
+            baseLight = Math.floor(baseLight * 0.4); // 60% reduction
+        } else if (condition.includes('cloud')) {
+            baseLight = Math.floor(baseLight * 0.6); // 40% reduction
+        } else if (condition.includes('partly')) {
+            baseLight = Math.floor(baseLight * 0.8); // 20% reduction
+        }
+
+        return Math.max(0, Math.min(100, baseLight));
     }
 
     async generateReading(farmId) {
@@ -34,18 +48,15 @@ class VirtualDeviceService {
         const farm = await Farm.findById(farmId);
         if (!farm) return null;
 
-        // Check plan
         const owner = await User.findById(farm.owner);
         if (!owner) return null;
 
         const planAllowed = virtualSettings.showForPlans?.[owner.selectedPlan];
         if (!planAllowed) return null;
 
-        // Skip if farm has physical field device
         const hasPhysicalDevice = await Device.exists({ farm: farmId, zone: 'field' });
         if (hasPhysicalDevice) return null;
 
-        // Get or create virtual device
         let virtualDevice = await VirtualDevice.findOne({ farm: farmId });
         if (!virtualDevice) {
             virtualDevice = await VirtualDevice.create({
@@ -57,31 +68,48 @@ class VirtualDeviceService {
             });
         }
 
-        // Generate readings based on toggles
         const reading = {};
         const toggles = virtualSettings.readings || {};
-        let weather = null;
+        let freshWeather = null;
 
-        // Fetch weather if any weather-based reading is enabled
-        if (toggles.temperature?.enabled || toggles.humidity?.enabled || toggles.soilMoisture?.enabled) {
-            weather = await weatherService.getFarmWeather(farmId).catch(() => null);
+        // Fetch FRESH weather from API (not cached)
+        if (toggles.temperature?.enabled || toggles.humidity?.enabled || toggles.soilMoisture?.enabled || toggles.lightLevel?.enabled) {
+            try {
+                freshWeather = await weatherService.fetchForFarm(farmId);
+                logger.debug(`Fresh weather fetched for farm ${farmId}`);
+            } catch (err) {
+                logger.warn(`Fresh weather fetch failed for farm ${farmId}: ${err.message}`);
+                freshWeather = null;
+            }
         }
 
         if (toggles.temperature?.enabled) {
-            reading.temperature = weather?.temperature?.avg || weather?.temperature?.max || 25;
+            const tempAvg = freshWeather?.temperature?.avg;
+            const tempMax = freshWeather?.temperature?.max;
+            const tempMin = freshWeather?.temperature?.min;
+            reading.temperature = tempAvg || tempMax || 25;
+
+            // Add small variation (±0.5°C) so readings aren't identical
+            reading.temperature = Math.round((reading.temperature + (Math.random() - 0.5)) * 10) / 10;
         }
 
         if (toggles.humidity?.enabled) {
-            reading.humidity = weather?.humidity || 60;
+            reading.humidity = Math.round(freshWeather?.humidity || 60);
+            
+            // Add small variation (±3%)
+            reading.humidity = Math.max(10, Math.min(100, reading.humidity + Math.floor((Math.random() - 0.5) * 6)));
         }
 
         if (toggles.soilMoisture?.enabled) {
-            const rainfall = weather?.rainfall || 0;
-            reading.soilMoisture = Math.round(Math.min(80, Math.max(15, rainfall * 3 + 20)));
+            const rainfall = freshWeather?.rainfall || 0;
+            const baseSoil = Math.min(80, Math.max(15, rainfall * 3 + 20));
+            
+            // Add small variation (±3%)
+            reading.soilMoisture = Math.max(10, Math.min(85, Math.round(baseSoil + (Math.random() - 0.5) * 6)));
         }
 
         if (toggles.lightLevel?.enabled) {
-            reading.lightLevel = this.calculateLightLevel();
+            reading.lightLevel = this.calculateLightLevel(freshWeather?.condition);
         }
 
         if (toggles.co2?.enabled) {
@@ -92,13 +120,11 @@ class VirtualDeviceService {
             reading.motion = false;
         }
 
-        // Skip if no readings enabled
         if (Object.keys(reading).length === 0) return null;
 
-        // Save reading
         const savedReading = await SensorReading.create({
             device: virtualDevice._id,
-            field: null, // Virtual device not tied to a specific field
+            field: null,
             ...reading,
             timestamp: new Date(),
         });
@@ -106,6 +132,8 @@ class VirtualDeviceService {
         virtualDevice.lastReadingAt = new Date();
         virtualDevice.status = 'online';
         await virtualDevice.save();
+
+        logger.debug(`Virtual reading generated for farm ${farmId}: ${JSON.stringify(reading)}`);
 
         return savedReading;
     }
