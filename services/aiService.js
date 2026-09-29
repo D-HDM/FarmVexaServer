@@ -1,7 +1,7 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
-const env = require('../config/env');
+const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
 class AIService {
@@ -86,7 +86,7 @@ class AIService {
 
     async checkHealth() {
         try {
-            const response = await axios.get(`${this.baseUrl}/api/health`, { timeout: 5000 });
+            const response = await axios.get(`${this.baseUrl}/api/health`, { timeout: 15000 });
             const data = response.data;
             return {
                 status: data?.server?.status === 'running' ? 'connected' : 'offline',
@@ -95,6 +95,7 @@ class AIService {
                 mernConnected: data.mern_server?.connected || false,
             };
         } catch (error) {
+            logger.error(`AI health check failed: ${error.message}`);
             return { status: 'offline', server: {}, ai: {}, mernConnected: false };
         }
     }
