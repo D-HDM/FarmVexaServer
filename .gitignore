@@ -15,7 +15,8 @@ build/
 .env.production.local
 
 # Logs
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 npm-debug.log*
 
@@ -42,8 +43,10 @@ Thumbs.db
 # Uploads
 uploads/*
 !uploads/.gitkeep
-temp/
-backups/
+temp/*
+!temp/.gitkeep
+backups/*
+!backups/.gitkeep
 
 # Python
 __pycache__/
