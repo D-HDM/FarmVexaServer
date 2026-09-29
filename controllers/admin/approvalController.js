@@ -60,7 +60,6 @@ const approveUser = asyncHandler(async (req, res) => {
     user.paymentStatus = 'paid';
     user.rejectionReason = undefined;
 
-    // Activate subscription
     if (user.planInterval === 'monthly') {
         user.subscriptionStartDate = new Date();
         user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -73,25 +72,15 @@ const approveUser = asyncHandler(async (req, res) => {
 
     await user.save();
 
-    // Mark all invoices for this user as paid
+    // Mark all invoices paid
     try {
-        await Invoice.updateMany(
-            { user: user._id, status: { $in: ['sent', 'draft'] } },
-            {
-                $set: {
-                    status: 'paid',
-                    amountPaid: 0, // will update below per invoice
-                    paidAt: new Date(),
-                    paymentMethod: 'manual',
-                },
-            }
-        );
-
-        // Set amountPaid = amountDue for each paid invoice
-        const paidInvoices = await Invoice.find({ user: user._id, status: 'paid' });
-        for (const inv of paidInvoices) {
+        const invoices = await Invoice.find({ user: user._id, status: { $in: ['sent', 'draft'] } });
+        for (const inv of invoices) {
+            inv.status = 'paid';
             inv.amountPaid = inv.total;
             inv.amountDue = 0;
+            inv.paidAt = new Date();
+            inv.paymentMethod = inv.paymentMethod || 'manual';
             await inv.save();
         }
     } catch (err) {
@@ -114,7 +103,7 @@ const approveUser = asyncHandler(async (req, res) => {
         logger.error(`Payment update on approval failed: ${err.message}`);
     }
 
-    // Update PendingApproval
+    // PendingApproval update
     let approval = await PendingApproval.findOne({ user: user._id });
     if (!approval) approval = new PendingApproval({ user: user._id });
     approval.status = 'approved';
@@ -200,7 +189,7 @@ const rejectUser = asyncHandler(async (req, res) => {
         logger.error(`Payment fail on rejection failed: ${err.message}`);
     }
 
-    // Update PendingApproval
+    // PendingApproval update
     let approval = await PendingApproval.findOne({ user: user._id });
     if (!approval) approval = new PendingApproval({ user: user._id });
     approval.status = 'rejected';
@@ -228,6 +217,68 @@ const rejectUser = asyncHandler(async (req, res) => {
             approvalStatus: user.approvalStatus,
         },
     }, 'User rejected');
+});
+
+/* ============ CONFIRM PAYMENT (without approving) ============ */
+const confirmPayment = asyncHandler(async (req, res) => {
+    const { method, reference, note } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return errorResponse(res, 'User not found', 404);
+
+    // Mark all sent/draft invoices as paid
+    const invoices = await Invoice.find({ user: user._id, status: { $in: ['sent', 'draft'] } });
+    for (const inv of invoices) {
+        inv.status = 'paid';
+        inv.amountPaid = inv.total;
+        inv.amountDue = 0;
+        inv.paidAt = new Date();
+        inv.paymentMethod = method || 'manual';
+        inv.paymentRef = reference || null;
+        await inv.save();
+    }
+
+    // Mark pending payments successful
+    await Payment.updateMany(
+        { user: user._id, status: 'pending' },
+        {
+            $set: {
+                status: 'success',
+                verifiedBy: req.user.id,
+                verifiedAt: new Date(),
+            },
+        }
+    );
+
+    user.paymentStatus = 'paid';
+    await user.save();
+
+    // Notify farmer
+    if (invoices.length > 0) {
+        try {
+            await emailService.send(user.email, 'farmerPaymentReceived', {
+                user,
+                invoiceNumber: invoices[0].invoiceNumber,
+                amount: invoices[0].total,
+                paymentMethod: method || 'manual',
+                paymentReference: reference || 'N/A',
+                paidAt: new Date(),
+            });
+            if (user.phone) {
+                await smsService.send(user.phone, 'farmerPaymentReceived', {
+                    user,
+                    invoiceNumber: invoices[0].invoiceNumber,
+                    amount: invoices[0].total,
+                });
+            }
+        } catch (err) {
+            logger.error(`Payment confirmation notification failed: ${err.message}`);
+        }
+    }
+
+    return successResponse(res, {
+        user: { id: user._id, name: user.name, paymentStatus: user.paymentStatus },
+        invoicesPaid: invoices.length,
+    }, 'Payment confirmed');
 });
 
 /* ============ APPROVAL HISTORY ============ */
@@ -274,5 +325,6 @@ module.exports = {
     getPendingApprovals,
     approveUser,
     rejectUser,
+    confirmPayment,
     getApprovalHistory,
 };

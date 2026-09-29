@@ -1,16 +1,16 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const env = require('../config/env');
+const { env } = require('../config/env');
 
 const generateToken = (userId, role) => {
     return jwt.sign({ id: userId, role }, env.jwtSecret, {
-        expiresIn: env.jwtExpire,
+        expiresIn: env.jwtExpiresIn,
     });
 };
 
 const generateRefreshToken = (userId, role) => {
     return jwt.sign({ id: userId, role }, env.jwtRefreshSecret, {
-        expiresIn: env.jwtRefreshExpire,
+        expiresIn: env.jwtRefreshExpiresIn,
     });
 };
 
