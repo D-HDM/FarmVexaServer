@@ -1,8 +1,5 @@
 const router = require('express').Router();
-const {
-    getPlans,
-    submitUpgrade,
-} = require('../../controllers/farm/planController');
+const { getPlans, submitUpgrade } = require('../../controllers/farm/planController');
 const farmerAuth = require('../../middleware/farm/auth');
 const subscriptionCheck = require('../../middleware/farm/subscriptionCheck');
 

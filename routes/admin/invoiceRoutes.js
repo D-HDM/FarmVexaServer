@@ -1,0 +1,17 @@
+const router = require('express').Router();
+const {
+    getAllInvoices,
+    getInvoiceById,
+    cancelInvoice,
+    getInvoiceStats,
+} = require('../../controllers/admin/invoiceController');
+const adminAuth = require('../../middleware/admin/adminAuth');
+
+router.use(adminAuth);
+
+router.get('/stats', getInvoiceStats);
+router.get('/', getAllInvoices);
+router.get('/:id', getInvoiceById);
+router.put('/:id/cancel', cancelInvoice);
+
+module.exports = router;

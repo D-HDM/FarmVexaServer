@@ -16,9 +16,9 @@ router.use('/weather-test', require('./weatherTestRoutes'));
 router.use('/backups', require('./backupRoutes'));
 router.use('/market', require('./marketRoutes'));
 router.use('/documents', require('./documentRoutes'));
-router.use('/payments', require('./paymentRecordsRoutes'));
+router.use('/virtual-device', require('./virtualDeviceRoutes'));
+router.use('/invoices', require('./invoiceRoutes'));
 router.use('/renewals', require('./renewalRoutes'));
 router.use('/plans', require('./planRoutes'));
-router.use('/virtual-device', require('./virtualDeviceRoutes'));
 
 module.exports = router;

@@ -5,7 +5,6 @@ const virtualDeviceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Farm',
         required: true,
-        unique: true,
     },
     name: {
         type: String,

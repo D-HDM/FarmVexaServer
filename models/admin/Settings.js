@@ -27,6 +27,8 @@ const emailToggleSchema = new mongoose.Schema({
     farmerStorageHumidityCritical: { type: Boolean, default: true },
     farmerStorageCo2Critical: { type: Boolean, default: true },
     farmerStorageRatDetected: { type: Boolean, default: true },
+    farmerInvoice: { type: Boolean, default: true },
+    farmerPaymentReceived: { type: Boolean, default: true },
     teamMemberAdded: { type: Boolean, default: true },
     adminNewFarmer: { type: Boolean, default: true },
     adminSystemCritical: { type: Boolean, default: true },
@@ -37,6 +39,7 @@ const emailToggleSchema = new mongoose.Schema({
     adminTrainingComplete: { type: Boolean, default: true },
     adminNewAdmin: { type: Boolean, default: true },
     adminWeeklyReport: { type: Boolean, default: true },
+    adminPaymentReceived: { type: Boolean, default: true },
     marketInquiry: { type: Boolean, default: true },
 });
 
@@ -54,11 +57,14 @@ const smsToggleSchema = new mongoose.Schema({
     farmerStorageHumidityCritical: { type: Boolean, default: true },
     farmerStorageCo2Critical: { type: Boolean, default: true },
     farmerStorageRatDetected: { type: Boolean, default: true },
+    farmerInvoice: { type: Boolean, default: true },
+    farmerPaymentReceived: { type: Boolean, default: true },
     teamMemberAdded: { type: Boolean, default: true },
     adminNewFarmer: { type: Boolean, default: true },
     adminSystemCritical: { type: Boolean, default: true },
     adminGeminiExceeded: { type: Boolean, default: true },
     adminPythonOffline: { type: Boolean, default: true },
+    adminPaymentReceived: { type: Boolean, default: true },
     marketInquiry: { type: Boolean, default: true },
 });
 
@@ -135,6 +141,24 @@ const virtualDeviceSettingsSchema = new mongoose.Schema({
         'Full Suite': { type: Boolean, default: true },
     },
     readings: { type: virtualDeviceReadingsSchema, default: () => ({}) },
+});
+
+const mpesaSettingsSchema = new mongoose.Schema({
+    env: { type: String, enum: ['sandbox', 'production'], default: 'production' },
+    baseUrl: { type: String, default: 'https://api.safaricom.co.ke' },
+    consumerKey: { type: String, default: '' },
+    consumerSecret: { type: String, default: '' },
+    shortcode: { type: String, default: '' },
+    passkey: { type: String, default: '' },
+    callbackUrl: { type: String, default: '' },
+    transactionType: { type: String, default: 'CustomerBuyGoodsOnline' },
+    enabled: { type: Boolean, default: false },
+});
+
+const invoiceSettingsSchema = new mongoose.Schema({
+    dueHours: { type: Number, default: 3 },
+    autoRejectHours: { type: Number, default: 3 },
+    reminderHoursBeforeDue: { type: Number, default: 1 },
 });
 
 const emailSettingsSchema = new mongoose.Schema({
@@ -218,6 +242,8 @@ const settingsSchema = new mongoose.Schema({
         diseaseRiskTemperature: { type: Number, default: 28 },
         alertFrequency: { type: Number, default: 30 },
     },
+    mpesa: { type: mpesaSettingsSchema, default: () => ({}) },
+    invoice: { type: invoiceSettingsSchema, default: () => ({}) },
     email: { type: emailSettingsSchema, default: () => ({}) },
     sms: { type: smsSettingsSchema, default: () => ({}) },
     emailToggles: { type: emailToggleSchema, default: () => ({}) },

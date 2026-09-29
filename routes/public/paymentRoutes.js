@@ -1,13 +1,14 @@
-const express = require('express');
-const router = express.Router();
+const router = require('express').Router();
 const {
-    initiateStkPush,
-    registerWithPayment,
-    checkPaymentStatus,
+    getPaymentMethods,
+    sendStkForInvoice,
+    checkStkStatus,
+    getInvoiceByNumber,
 } = require('../../controllers/public/paymentController');
 
-router.post('/stk-push', initiateStkPush);
-router.post('/register', registerWithPayment);
-router.get('/status/:email', checkPaymentStatus);
+router.get('/methods', getPaymentMethods);
+router.post('/stk-invoice', sendStkForInvoice);
+router.get('/mpesa-status/:checkoutRequestId', checkStkStatus);
+router.get('/invoice/:invoiceNumber', getInvoiceByNumber);
 
 module.exports = router;

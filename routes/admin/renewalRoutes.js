@@ -7,7 +7,6 @@ const {
 const adminAuth = require('../../middleware/admin/adminAuth');
 
 router.use(adminAuth);
-
 router.get('/', getRenewalRequests);
 router.put('/:id/approve', approveRenewal);
 router.put('/:id/reject', rejectRenewal);

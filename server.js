@@ -1,7 +1,7 @@
 const express = require('express');
 const connectDB = require('./config/db');
 const { connectRedis } = require('./config/redis');
-const env = require('./config/env');
+const { env } = require('./config/env');
 const { startSchedulers } = require('./schedulers');
 const errorHandler = require('./middleware/global/errorHandler');
 const requestLogger = require('./middleware/global/requestLogger');
@@ -37,6 +37,7 @@ const server = app.listen(PORT, () => {
     console.log(`\x1b[36m🚀 FarmVexa Server\x1b[0m → Port ${PORT} [${env.nodeEnv}]`);
     console.log(`\x1b[32m🔗 API:\x1b[0m ${env.apiUrl}`);
     console.log(`\x1b[32m🧠 AI:\x1b[0m ${env.pythonAiUrl}`);
+    console.log(`\x1b[32m💳 M-Pesa:\x1b[0m ${env.mpesa.env} (${env.mpesa.shortcode || 'not configured'})`);
     startSchedulers();
 });
 

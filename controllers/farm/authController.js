@@ -1,38 +1,56 @@
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const User = require('../../models/farm/User');
 const Farm = require('../../models/farm/Farm');
 const TeamMember = require('../../models/farm/TeamMember');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
+const Invoice = require('../../models/admin/Invoice');
+const Settings = require('../../models/admin/Settings');
+const Admin = require('../../models/admin/Admin');
+const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
+const logger = require('../../utils/logger');
 
-const generateToken = (user) => {
-    return jwt.sign(
-        { id: user._id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+const PLAN_PRICES = {
+    'Basic Monthly': { price: 500, interval: 'monthly' },
+    'Basic': { price: 6000, interval: 'one_time' },
+    'Pro': { price: 10000, interval: 'one_time' },
+    'Full Suite': { price: 15000, interval: 'one_time' },
 };
 
-const generateRefreshToken = (user) => {
-    return jwt.sign(
-        { id: user._id, role: user.role },
-        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
-    );
-};
+const generateToken = (user) => jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+);
 
+const generateRefreshToken = (user) => jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
+);
+
+/* ============ REGISTER ============ */
 const register = asyncHandler(async (req, res) => {
-    const { name, email, phone, password, county, subCounty } = req.body;
+    const { name, email, phone, password, county, subCounty, plan } = req.body;
 
     if (!name || !email || !phone || !password) {
         return errorResponse(res, 'All fields are required', 400);
     }
+    if (!plan) return errorResponse(res, 'Plan is required', 400);
+
+    const settings = await Settings.findOne();
+    if (settings?.system?.allowSelfRegistration === false) {
+        return errorResponse(res, 'Registration is currently closed', 403);
+    }
 
     const existing = await User.findOne({ email });
     if (existing) return errorResponse(res, 'Email already registered', 400);
+
+    const planInfo = PLAN_PRICES[plan];
+    if (!planInfo) return errorResponse(res, 'Invalid plan', 400);
 
     const user = await User.create({
         name,
@@ -44,13 +62,61 @@ const register = asyncHandler(async (req, res) => {
         role: 'farmer',
         approvalStatus: 'pending',
         isActive: false,
+        selectedPlan: plan,
+        planInterval: planInfo.interval,
+        planPrice: planInfo.price,
+        paymentStatus: 'unpaid',
     });
 
-    // Send pending email
-    emailService.send(email, 'farmerRegistrationPending', {
-        user,
-        data: { name, email, phone, county, subCounty },
-    }).catch(() => {});
+    let invoice = null;
+    try {
+        const result = await invoiceService.generateInvoice({
+            userId: user._id,
+            user,
+            plan,
+            planPrice: planInfo.price,
+            planInterval: planInfo.interval,
+            type: 'registration',
+        });
+        invoice = result.invoice;
+    } catch (err) {
+        logger.error(`Invoice generation failed: ${err.message}`);
+    }
+
+    // Email to farmer
+    try {
+        await emailService.send(email, 'farmerRegistrationPending', {
+            user: { name, email, phone },
+            name, email, phone, county, subCounty,
+            planName: plan,
+            amount: planInfo.price,
+            interval: planInfo.interval,
+            invoiceNumber: invoice?.invoiceNumber,
+            dueDate: invoice?.dueDate,
+            paymentInstructions: invoice?.paymentInstructions || [],
+        });
+    } catch (err) {
+        logger.error(`Registration email failed: ${err.message}`);
+    }
+
+    // Admin notification
+    try {
+        const admins = await Admin.find({ isActive: true });
+        for (const admin of admins) {
+            await emailService.send(admin.email, 'adminNewFarmer', {
+                user: { name: admin.name, email: admin.email },
+                farmer: { name, email, phone },
+                planName: plan,
+                amount: planInfo.price,
+                invoiceNumber: invoice?.invoiceNumber,
+            });
+        }
+    } catch (err) {
+        logger.error(`Admin notification failed: ${err.message}`);
+    }
+
+    const token = generateToken(user);
+    const refreshToken = generateRefreshToken(user);
 
     return successResponse(res, {
         user: {
@@ -58,16 +124,29 @@ const register = asyncHandler(async (req, res) => {
             name: user.name,
             email: user.email,
             approvalStatus: user.approvalStatus,
+            selectedPlan: user.selectedPlan,
+            paymentStatus: user.paymentStatus,
         },
-    }, 'Registration submitted. Awaiting approval.', 201);
+        plan: { name: plan, price: planInfo.price, interval: planInfo.interval },
+        invoice: invoice ? {
+            id: invoice._id,
+            invoiceNumber: invoice.invoiceNumber,
+            amountDue: invoice.amountDue,
+            currency: invoice.currency,
+            dueDate: invoice.dueDate,
+            status: invoice.status,
+            paymentInstructions: invoice.paymentInstructions,
+        } : null,
+        scope: 'pending',
+        token,
+        refreshToken,
+    }, 'Registration submitted. Awaiting payment.', 201);
 });
 
+/* ============ LOGIN ============ */
 const login = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-        return errorResponse(res, 'Email and password required', 400);
-    }
+    if (!email || !password) return errorResponse(res, 'Email and password required', 400);
 
     const user = await User.findOne({ email }).select('+password');
     if (!user) return errorResponse(res, 'Invalid credentials', 401);
@@ -75,20 +154,26 @@ const login = asyncHandler(async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return errorResponse(res, 'Invalid credentials', 401);
 
-    if (user.approvalStatus !== 'approved') {
-        return errorResponse(res, 'Account not approved yet', 403);
+    if (user.approvalStatus === 'rejected') {
+        return errorResponse(res, 'Account was rejected. Contact support.', 403);
     }
 
-    const isExpired = user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry);
+    let invoice = null;
+    if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
+        invoice = await Invoice.findOne({
+            user: user._id,
+            status: { $in: ['sent', 'draft'] },
+        }).sort({ createdAt: -1 }).lean();
+    }
 
-    if (isExpired) {
+    let scope = 'active';
+    if (user.approvalStatus === 'pending') scope = 'pending';
+
+    if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) {
         user.subscriptionStatus = 'expired';
         user.isActive = false;
         await user.save();
-    }
-
-    if (!isExpired && !user.isActive) {
-        return errorResponse(res, 'Account deactivated', 403);
+        scope = 'expired';
     }
 
     user.lastLogin = new Date();
@@ -96,27 +181,6 @@ const login = asyncHandler(async (req, res) => {
 
     const token = generateToken(user);
     const refreshToken = generateRefreshToken(user);
-
-    if (isExpired) {
-        return res.status(402).json({
-            success: false,
-            message: 'Subscription expired. Please renew.',
-            data: {
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    selectedPlan: user.selectedPlan,
-                    subscriptionStatus: user.subscriptionStatus,
-                    subscriptionExpiry: user.subscriptionExpiry,
-                },
-                token,
-                refreshToken,
-                subscriptionExpired: true,
-            },
-            timestamp: new Date().toISOString(),
-        });
-    }
 
     return successResponse(res, {
         user: {
@@ -127,14 +191,69 @@ const login = asyncHandler(async (req, res) => {
             role: user.role,
             county: user.county,
             subCounty: user.subCounty,
+            approvalStatus: user.approvalStatus,
             selectedPlan: user.selectedPlan,
-            subscriptionExpiry: user.subscriptionExpiry,
+            paymentStatus: user.paymentStatus,
             subscriptionStatus: user.subscriptionStatus,
+            subscriptionExpiry: user.subscriptionExpiry,
         },
+        invoice: invoice ? {
+            invoiceNumber: invoice.invoiceNumber,
+            amountDue: invoice.amountDue,
+            currency: invoice.currency,
+            dueDate: invoice.dueDate,
+            status: invoice.status,
+            paymentInstructions: invoice.paymentInstructions,
+        } : null,
+        scope,
         token,
         refreshToken,
     }, 'Login successful');
 });
+
+/* ============ ME (pending page polling) ============ */
+const getMe = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user.id).select('-password').lean();
+    if (!user) return errorResponse(res, 'User not found', 404);
+
+    let invoice = null;
+    if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
+        invoice = await Invoice.findOne({
+            user: user._id,
+            status: { $in: ['sent', 'draft'] },
+        }).sort({ createdAt: -1 }).lean();
+    }
+
+    let scope = 'active';
+    if (user.approvalStatus === 'pending') scope = 'pending';
+    if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) scope = 'expired';
+
+    return successResponse(res, {
+        user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            approvalStatus: user.approvalStatus,
+            selectedPlan: user.selectedPlan,
+            paymentStatus: user.paymentStatus,
+            subscriptionStatus: user.subscriptionStatus,
+            subscriptionExpiry: user.subscriptionExpiry,
+        },
+        invoice: invoice ? {
+            invoiceNumber: invoice.invoiceNumber,
+            amountDue: invoice.amountDue,
+            currency: invoice.currency,
+            dueDate: invoice.dueDate,
+            status: invoice.status,
+            paymentInstructions: invoice.paymentInstructions,
+        } : null,
+        scope,
+    });
+});
+
+/* ============ PROFILE ============ */
 const getProfile = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -160,7 +279,6 @@ const updateProfile = asyncHandler(async (req, res) => {
 
 const changePassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = req.body;
-
     if (!currentPassword || !newPassword) {
         return errorResponse(res, 'Current and new password required', 400);
     }
@@ -177,12 +295,13 @@ const changePassword = asyncHandler(async (req, res) => {
     return successResponse(res, null, 'Password changed');
 });
 
+/* ============ FORGOT / RESET ============ */
 const forgotPassword = asyncHandler(async (req, res) => {
     const { email } = req.body;
     if (!email) return errorResponse(res, 'Email required', 400);
 
     const user = await User.findOne({ email });
-    if (!user) return errorResponse(res, 'If that email exists, a reset link has been sent', 200);
+    if (!user) return successResponse(res, null, 'If that email exists, a reset link has been sent');
 
     const resetToken = crypto.randomBytes(32).toString('hex');
     user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
@@ -192,7 +311,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
     emailService.send(email, 'farmerPasswordReset', {
         user,
-        data: { resetUrl },
+        resetUrl,
     }).catch(() => {});
 
     return successResponse(res, null, 'If that email exists, a reset link has been sent');
@@ -201,7 +320,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
 const resetPassword = asyncHandler(async (req, res) => {
     const { token } = req.params;
     const { password } = req.body;
-
     if (!password) return errorResponse(res, 'Password required', 400);
 
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
@@ -227,43 +345,24 @@ const refreshTokenHandler = asyncHandler(async (req, res) => {
     try {
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
         const user = await User.findById(decoded.id);
-
         if (!user) return errorResponse(res, 'User not found', 404);
-        if (!user.isActive) return errorResponse(res, 'Account deactivated', 403);
 
         const newToken = generateToken(user);
         const newRefreshToken = generateRefreshToken(user);
-
         return successResponse(res, { token: newToken, refreshToken: newRefreshToken }, 'Token refreshed');
-    } catch (error) {
+    } catch {
         return errorResponse(res, 'Invalid refresh token', 401);
     }
-});
-
-const getSubscriptionDetails = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.id).select('-password').lean();
-    if (!user) return errorResponse(res, 'User not found', 404);
-
-    return successResponse(res, {
-        plan: user.selectedPlan,
-        planInterval: user.planInterval,
-        planPrice: user.planPrice,
-        subscriptionExpiry: user.subscriptionExpiry,
-        subscriptionStatus: user.subscriptionStatus,
-        lastRenewalDate: user.lastRenewalDate,
-        renewalCount: user.renewalCount,
-        isExpired: user.subscriptionExpiry ? new Date() > new Date(user.subscriptionExpiry) : false,
-    });
 });
 
 module.exports = {
     register,
     login,
+    getMe,
     getProfile,
     updateProfile,
     changePassword,
     forgotPassword,
     resetPassword,
     refreshTokenHandler,
-    getSubscriptionDetails,
 };

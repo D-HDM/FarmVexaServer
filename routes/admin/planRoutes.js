@@ -7,7 +7,6 @@ const {
 const adminAuth = require('../../middleware/admin/adminAuth');
 
 router.use(adminAuth);
-
 router.get('/upgrades', getUpgradeRequests);
 router.put('/upgrades/:id/approve', approveUpgrade);
 router.put('/upgrades/:id/reject', rejectUpgrade);

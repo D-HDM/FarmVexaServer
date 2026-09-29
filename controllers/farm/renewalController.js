@@ -1,6 +1,9 @@
 const User = require('../../models/farm/User');
-const PaymentRecord = require('../../models/admin/PaymentRecord');
+const Invoice = require('../../models/admin/Invoice');
+const Payment = require('../../models/admin/Payment');
 const PendingApproval = require('../../models/admin/PendingApproval');
+const Settings = require('../../models/admin/Settings');
+const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const Admin = require('../../models/admin/Admin');
@@ -8,15 +11,22 @@ const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
+const PLAN_PRICES = {
+    'Basic Monthly': { price: 500, interval: 'monthly' },
+    'Basic': { price: 6000, interval: 'one_time' },
+    'Pro': { price: 10000, interval: 'one_time' },
+    'Full Suite': { price: 15000, interval: 'one_time' },
+};
+
 const getSubscriptionDetails = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password').lean();
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    const pendingRenewal = await PendingApproval.findOne({
+    const pendingInvoice = await Invoice.findOne({
         user: user._id,
         type: 'renewal',
-        status: 'pending',
-    }).lean();
+        status: { $in: ['sent', 'draft'] },
+    }).sort({ createdAt: -1 }).lean();
 
     return successResponse(res, {
         plan: user.selectedPlan,
@@ -27,78 +37,96 @@ const getSubscriptionDetails = asyncHandler(async (req, res) => {
         lastRenewalDate: user.lastRenewalDate,
         renewalCount: user.renewalCount,
         isExpired: user.subscriptionExpiry ? new Date() > new Date(user.subscriptionExpiry) : false,
-        pendingRenewal: pendingRenewal ? {
-            id: pendingRenewal._id,
-            submittedAt: pendingRenewal.createdAt,
-            reference: pendingRenewal.paymentReference,
-            amount: pendingRenewal.amount,
-            paymentMethod: pendingRenewal.paymentMethod,
+        invoice: pendingInvoice ? {
+            id: pendingInvoice._id,
+            invoiceNumber: pendingInvoice.invoiceNumber,
+            amountDue: pendingInvoice.amountDue,
+            currency: pendingInvoice.currency,
+            dueDate: pendingInvoice.dueDate,
+            status: pendingInvoice.status,
+            paymentInstructions: pendingInvoice.paymentInstructions,
         } : null,
     });
 });
 
 const submitRenewal = asyncHandler(async (req, res) => {
-    const { paymentMethod, paymentReference, amount } = req.body;
-
-    if (!paymentMethod) return errorResponse(res, 'Payment method is required', 400);
-    if (!paymentReference) return errorResponse(res, 'Payment reference is required', 400);
-
     const user = await User.findById(req.user.id);
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    const existingPending = await PendingApproval.findOne({
-        user: user._id,
-        type: 'renewal',
-        status: 'pending',
-    });
-    if (existingPending) {
-        return errorResponse(res, 'You already have a pending renewal request', 400);
+    if (!user.selectedPlan || !PLAN_PRICES[user.selectedPlan]) {
+        return errorResponse(res, 'No plan to renew', 400);
     }
 
-    const renewalAmount = amount || user.planPrice || 500;
+    // Check for existing pending renewal invoice
+    const existing = await Invoice.findOne({
+        user: user._id,
+        type: 'renewal',
+        status: { $in: ['sent', 'draft'] },
+    });
+    if (existing) {
+        return errorResponse(res, `You already have a pending renewal invoice (${existing.invoiceNumber})`, 400);
+    }
 
-    const approval = await PendingApproval.create({
+    const planInfo = PLAN_PRICES[user.selectedPlan];
+    const settings = await Settings.findOne();
+    const dueHours = settings?.invoice?.dueHours || 3;
+
+    // Create invoice
+    let invoice;
+    try {
+        const result = await invoiceService.generateInvoice({
+            userId: user._id,
+            user,
+            plan: user.selectedPlan,
+            planPrice: planInfo.price,
+            planInterval: planInfo.interval,
+            type: 'renewal',
+        });
+        invoice = result.invoice;
+    } catch (err) {
+        logger.error(`Renewal invoice generation failed: ${err.message}`);
+        return errorResponse(res, 'Failed to generate renewal invoice', 500);
+    }
+
+    // Track renewal request
+    await PendingApproval.create({
         user: user._id,
         type: 'renewal',
         status: 'pending',
         plan: user.selectedPlan,
-        amount: renewalAmount,
-        paymentMethod,
-        paymentReference,
-    });
-
-    await PaymentRecord.create({
-        user: user._id,
-        email: user.email,
-        phone: user.phone,
-        amount: renewalAmount,
-        plan: user.selectedPlan,
-        type: 'renewal',
-        reference: paymentReference,
-        status: 'pending_verification',
-        methodType: paymentMethod,
+        amount: planInfo.price,
+        paymentMethod: 'invoice',
+        paymentReference: invoice.invoiceNumber,
     });
 
     user.subscriptionStatus = 'pending_renewal';
     await user.save();
 
-    // 1. Farmer — Renewal Received Email
+    // Notify farmer
     try {
         await emailService.send(user.email, 'farmerRenewalReceived', {
             user,
             name: user.name,
             planName: user.selectedPlan,
-            amount: renewalAmount,
-            paymentMethod,
-            reference: paymentReference,
+            amount: planInfo.price,
+            invoiceNumber: invoice.invoiceNumber,
+            dueDate: invoice.dueDate,
+            paymentInstructions: invoice.paymentInstructions,
             previousExpiry: user.subscriptionExpiry,
         });
-        logger.info(`Renewal received email sent to ${user.email}`);
-    } catch (emailError) {
-        logger.error(`Renewal received email failed: ${emailError.message}`);
+        if (user.phone) {
+            await smsService.send(user.phone, 'farmerRenewalReceived', {
+                user,
+                planName: user.selectedPlan,
+                amount: planInfo.price,
+                invoiceNumber: invoice.invoiceNumber,
+            });
+        }
+    } catch (err) {
+        logger.error(`Renewal email failed: ${err.message}`);
     }
 
-    // 2. Admin — Renewal Request Email
+    // Notify admins
     try {
         const admins = await Admin.find({ isActive: true });
         for (const admin of admins) {
@@ -106,57 +134,28 @@ const submitRenewal = asyncHandler(async (req, res) => {
                 user: { name: admin.name, email: admin.email },
                 farmer: { name: user.name, email: user.email, phone: user.phone },
                 planName: user.selectedPlan,
-                amount: renewalAmount,
-                paymentMethod,
-                reference: paymentReference,
+                amount: planInfo.price,
+                invoiceNumber: invoice.invoiceNumber,
             });
         }
-        logger.info(`Renewal request email sent to admins for ${user.email}`);
-    } catch (adminEmailError) {
-        logger.error(`Admin renewal email failed: ${adminEmailError.message}`);
-    }
-
-    // 3. Farmer — Renewal Received SMS
-    try {
-        if (user.phone) {
-            await smsService.send(user.phone, 'farmerRenewalReceived', {
-                user,
-                planName: user.selectedPlan,
-                amount: renewalAmount,
-            });
-            logger.info(`Renewal received SMS sent to ${user.phone}`);
-        }
-    } catch (smsError) {
-        logger.error(`Renewal SMS failed: ${smsError.message}`);
-    }
-
-    // 4. Admin — Renewal Request SMS
-    try {
-        const admins = await Admin.find({ isActive: true, phone: { $exists: true, $ne: '' } });
-        for (const admin of admins) {
-            await smsService.send(admin.phone, 'adminRenewalRequest', {
-                user: { name: admin.name, phone: admin.phone },
-                farmer: { name: user.name, email: user.email, phone: user.phone },
-                planName: user.selectedPlan,
-                amount: renewalAmount,
-                reference: paymentReference,
-            });
-        }
-        logger.info(`Renewal request SMS sent to admins for ${user.email}`);
-    } catch (adminSmsError) {
-        logger.error(`Admin renewal SMS failed: ${adminSmsError.message}`);
+    } catch (err) {
+        logger.error(`Admin renewal notification failed: ${err.message}`);
     }
 
     return successResponse(res, {
-        approval: {
-            id: approval._id,
-            status: approval.status,
-            plan: approval.plan,
-            amount: approval.amount,
+        invoice: {
+            id: invoice._id,
+            invoiceNumber: invoice.invoiceNumber,
+            amountDue: invoice.amountDue,
+            currency: invoice.currency,
+            dueDate: invoice.dueDate,
+            status: invoice.status,
+            paymentInstructions: invoice.paymentInstructions,
         },
-    }, 'Renewal request submitted. Awaiting approval.', 201);
+    }, 'Renewal invoice created. Please complete payment.', 201);
 });
 
+// Admin endpoints
 const getRenewalRequests = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
     const query = { type: 'renewal' };
@@ -174,19 +173,14 @@ const getRenewalRequests = asyncHandler(async (req, res) => {
 
     return successResponse(res, {
         renewals,
-        pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total,
-            pages: Math.ceil(total / limit),
-        },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) },
     });
 });
 
 const approveRenewal = asyncHandler(async (req, res) => {
     const approval = await PendingApproval.findById(req.params.id);
     if (!approval) return errorResponse(res, 'Renewal request not found', 404);
-    if (approval.status !== 'pending') return errorResponse(res, `Request is already ${approval.status}`, 400);
+    if (approval.status !== 'pending') return errorResponse(res, `Already ${approval.status}`, 400);
 
     const user = await User.findById(approval.user);
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -201,12 +195,19 @@ const approveRenewal = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    const payment = await PaymentRecord.findOne({ user: user._id, type: 'renewal' }).sort({ createdAt: -1 });
-    if (payment) {
-        payment.status = 'completed';
-        payment.verifiedBy = req.user.id;
-        payment.verifiedAt = new Date();
-        await payment.save();
+    // Mark invoice paid if exists
+    const invoice = await Invoice.findOne({
+        user: user._id,
+        type: 'renewal',
+        status: { $in: ['sent', 'paid'] },
+    }).sort({ createdAt: -1 });
+
+    if (invoice && invoice.status !== 'paid') {
+        invoice.status = 'paid';
+        invoice.amountPaid = invoice.amountDue;
+        invoice.amountDue = 0;
+        invoice.paidAt = new Date();
+        await invoice.save();
     }
 
     try {
@@ -223,8 +224,8 @@ const approveRenewal = asyncHandler(async (req, res) => {
                 newExpiry: user.subscriptionExpiry,
             });
         }
-    } catch (notifyError) {
-        logger.error(`Renewal approval notification failed: ${notifyError.message}`);
+    } catch (err) {
+        logger.error(`Renewal approval notification failed: ${err.message}`);
     }
 
     return successResponse(res, {
@@ -244,10 +245,7 @@ const rejectRenewal = asyncHandler(async (req, res) => {
 
     const approval = await PendingApproval.findById(req.params.id);
     if (!approval) return errorResponse(res, 'Renewal request not found', 404);
-    if (approval.status !== 'pending') return errorResponse(res, `Request is already ${approval.status}`, 400);
-
-    const user = await User.findById(approval.user);
-    if (!user) return errorResponse(res, 'User not found', 404);
+    if (approval.status !== 'pending') return errorResponse(res, `Already ${approval.status}`, 400);
 
     approval.status = 'rejected';
     approval.reviewedBy = req.user.id;
@@ -256,30 +254,19 @@ const rejectRenewal = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    const payment = await PaymentRecord.findOne({ user: user._id, type: 'renewal' }).sort({ createdAt: -1 });
-    if (payment) {
-        payment.status = 'failed';
-        payment.verifiedBy = req.user.id;
-        payment.verifiedAt = new Date();
-        await payment.save();
-    }
+    const user = await User.findById(approval.user);
+    if (user) {
+        user.subscriptionStatus = user.isSubscriptionExpired() ? 'expired' : 'active';
+        await user.save();
 
-    user.subscriptionStatus = user.isSubscriptionExpired() ? 'expired' : 'active';
-    await user.save();
-
-    try {
-        await emailService.send(user.email, 'farmerRenewalRejected', {
-            user,
-            reason,
-        });
-        if (user.phone) {
-            await smsService.send(user.phone, 'farmerRenewalRejected', {
-                user,
-                reason,
-            });
+        try {
+            await emailService.send(user.email, 'farmerRenewalRejected', { user, reason });
+            if (user.phone) {
+                await smsService.send(user.phone, 'farmerRenewalRejected', { user, reason });
+            }
+        } catch (err) {
+            logger.error(`Renewal rejection notification failed: ${err.message}`);
         }
-    } catch (notifyError) {
-        logger.error(`Renewal rejection notification failed: ${notifyError.message}`);
     }
 
     return successResponse(res, null, 'Renewal rejected');

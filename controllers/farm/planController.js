@@ -1,6 +1,8 @@
 const User = require('../../models/farm/User');
-const PaymentRecord = require('../../models/admin/PaymentRecord');
+const Invoice = require('../../models/admin/Invoice');
 const PendingApproval = require('../../models/admin/PendingApproval');
+const Settings = require('../../models/admin/Settings');
+const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const Admin = require('../../models/admin/Admin');
@@ -30,30 +32,20 @@ const getPlans = asyncHandler(async (req, res) => {
 
     const plans = Object.keys(planPrices).map((name) => {
         const planInfo = planPrices[name];
-        const fullPrice = planInfo.price;
-        const upgradeCost = Math.max(0, fullPrice - currentPlanPrice);
+        const upgradeCost = Math.max(0, planInfo.price - currentPlanPrice);
 
         let status = 'available';
-
-        if (name === currentPlan) {
-            status = 'current';
-        } else if (currentPlan === 'Full Suite') {
-            status = 'purchased';
-        } else if (currentPlan === 'Pro' && (name === 'Basic' || name === 'Basic Monthly')) {
-            status = 'purchased';
-        } else if (currentPlan === 'Basic' && name === 'Basic Monthly') {
-            status = 'purchased';
-        } else if (currentPlan === 'Basic Monthly' && name === 'Basic') {
-            status = 'upgrade_available';
-        } else if ((currentPlan === 'Basic' || currentPlan === 'Basic Monthly') && (name === 'Pro' || name === 'Full Suite')) {
-            status = 'upgrade_available';
-        } else if (currentPlan === 'Pro' && name === 'Full Suite') {
-            status = 'upgrade_available';
-        }
+        if (name === currentPlan) status = 'current';
+        else if (currentPlan === 'Full Suite') status = 'purchased';
+        else if (currentPlan === 'Pro' && (name === 'Basic' || name === 'Basic Monthly')) status = 'purchased';
+        else if (currentPlan === 'Basic' && name === 'Basic Monthly') status = 'purchased';
+        else if (currentPlan === 'Basic Monthly' && name === 'Basic') status = 'upgrade_available';
+        else if ((currentPlan === 'Basic' || currentPlan === 'Basic Monthly') && (name === 'Pro' || name === 'Full Suite')) status = 'upgrade_available';
+        else if (currentPlan === 'Pro' && name === 'Full Suite') status = 'upgrade_available';
 
         return {
             name,
-            price: fullPrice,
+            price: planInfo.price,
             interval: planInfo.interval,
             order: planInfo.order,
             status,
@@ -72,19 +64,14 @@ const getPlans = asyncHandler(async (req, res) => {
             newPlan: pendingUpgrade.newPlan,
             amount: pendingUpgrade.amount,
             submittedAt: pendingUpgrade.createdAt,
-            paymentMethod: pendingUpgrade.paymentMethod,
-            paymentReference: pendingUpgrade.paymentReference,
         } : null,
         plans,
     });
 });
 
 const submitUpgrade = asyncHandler(async (req, res) => {
-    const { newPlan, paymentMethod, paymentReference } = req.body;
-
-    if (!newPlan) return errorResponse(res, 'New plan is required', 400);
-    if (!paymentMethod) return errorResponse(res, 'Payment method is required', 400);
-    if (!paymentReference) return errorResponse(res, 'Payment reference is required', 400);
+    const { newPlan } = req.body;
+    if (!newPlan) return errorResponse(res, 'New plan required', 400);
 
     const user = await User.findById(req.user.id);
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -96,18 +83,33 @@ const submitUpgrade = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Cannot upgrade to same or lower plan', 400);
     }
 
-    const existingPending = await PendingApproval.findOne({
+    const existing = await PendingApproval.findOne({
         user: user._id,
         type: 'upgrade',
         status: 'pending',
     });
-    if (existingPending) {
-        return errorResponse(res, 'You already have a pending upgrade request', 400);
+    if (existing) return errorResponse(res, 'You already have a pending upgrade request', 400);
+
+    const upgradeAmount = newPlanPrice - currentPlanPrice;
+
+    // Create invoice
+    let invoice;
+    try {
+        const result = await invoiceService.generateInvoice({
+            userId: user._id,
+            user,
+            plan: newPlan,
+            planPrice: upgradeAmount,
+            planInterval: planPrices[newPlan].interval,
+            type: 'upgrade',
+        });
+        invoice = result.invoice;
+    } catch (err) {
+        logger.error(`Upgrade invoice generation failed: ${err.message}`);
+        return errorResponse(res, 'Failed to generate upgrade invoice', 500);
     }
 
-    const upgradeAmount = Math.max(0, newPlanPrice - currentPlanPrice);
-
-    const approval = await PendingApproval.create({
+    await PendingApproval.create({
         user: user._id,
         type: 'upgrade',
         status: 'pending',
@@ -115,23 +117,10 @@ const submitUpgrade = asyncHandler(async (req, res) => {
         newPlan,
         plan: newPlan,
         amount: upgradeAmount,
-        paymentMethod,
-        paymentReference,
+        paymentMethod: 'invoice',
+        paymentReference: invoice.invoiceNumber,
     });
 
-    await PaymentRecord.create({
-        user: user._id,
-        email: user.email,
-        phone: user.phone,
-        amount: upgradeAmount,
-        plan: newPlan,
-        type: 'upgrade',
-        reference: paymentReference,
-        status: 'pending_verification',
-        methodType: paymentMethod,
-    });
-
-    // Farmer — Upgrade Received Email
     try {
         await emailService.send(user.email, 'farmerUpgradeReceived', {
             user,
@@ -139,15 +128,23 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             oldPlan: user.selectedPlan,
             newPlan,
             amount: upgradeAmount,
-            paymentMethod,
-            reference: paymentReference,
+            invoiceNumber: invoice.invoiceNumber,
+            dueDate: invoice.dueDate,
+            paymentInstructions: invoice.paymentInstructions,
         });
-        logger.info(`Upgrade received email sent to ${user.email}`);
-    } catch (e) {
-        logger.error(`Upgrade email failed: ${e.message}`);
+        if (user.phone) {
+            await smsService.send(user.phone, 'farmerUpgradeReceived', {
+                user,
+                oldPlan: user.selectedPlan,
+                newPlan,
+                amount: upgradeAmount,
+                invoiceNumber: invoice.invoiceNumber,
+            });
+        }
+    } catch (err) {
+        logger.error(`Upgrade email failed: ${err.message}`);
     }
 
-    // Admin — Upgrade Request Email
     try {
         const admins = await Admin.find({ isActive: true });
         for (const admin of admins) {
@@ -157,59 +154,26 @@ const submitUpgrade = asyncHandler(async (req, res) => {
                 oldPlan: user.selectedPlan,
                 newPlan,
                 amount: upgradeAmount,
-                paymentMethod,
-                reference: paymentReference,
+                invoiceNumber: invoice.invoiceNumber,
             });
         }
-        logger.info(`Upgrade request email sent to admins for ${user.email}`);
-    } catch (e) {
-        logger.error(`Admin upgrade email failed: ${e.message}`);
-    }
-
-    // Farmer — Upgrade Received SMS
-    try {
-        if (user.phone) {
-            await smsService.send(user.phone, 'farmerUpgradeReceived', {
-                user,
-                oldPlan: user.selectedPlan,
-                newPlan,
-                amount: upgradeAmount,
-            });
-            logger.info(`Upgrade received SMS sent to ${user.phone}`);
-        }
-    } catch (e) {
-        logger.error(`Upgrade SMS failed: ${e.message}`);
-    }
-
-    // Admin — Upgrade Request SMS
-    try {
-        const admins = await Admin.find({ isActive: true, phone: { $exists: true, $ne: '' } });
-        for (const admin of admins) {
-            await smsService.send(admin.phone, 'adminUpgradeRequest', {
-                user: { name: admin.name, phone: admin.phone },
-                farmer: { name: user.name, email: user.email, phone: user.phone },
-                oldPlan: user.selectedPlan,
-                newPlan,
-                amount: upgradeAmount,
-                reference: paymentReference,
-            });
-        }
-        logger.info(`Upgrade request SMS sent to admins for ${user.email}`);
-    } catch (e) {
-        logger.error(`Admin upgrade SMS failed: ${e.message}`);
+    } catch (err) {
+        logger.error(`Admin upgrade notification failed: ${err.message}`);
     }
 
     return successResponse(res, {
-        approval: {
-            id: approval._id,
-            status: approval.status,
-            oldPlan: approval.oldPlan,
-            newPlan: approval.newPlan,
-            amount: approval.amount,
+        invoice: {
+            id: invoice._id,
+            invoiceNumber: invoice.invoiceNumber,
+            amountDue: invoice.amountDue,
+            currency: invoice.currency,
+            dueDate: invoice.dueDate,
+            paymentInstructions: invoice.paymentInstructions,
         },
-    }, 'Upgrade request submitted. Awaiting approval.', 201);
+    }, 'Upgrade invoice created. Please complete payment.', 201);
 });
 
+// Admin endpoints
 const getUpgradeRequests = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
     const query = { type: 'upgrade' };
@@ -227,19 +191,14 @@ const getUpgradeRequests = asyncHandler(async (req, res) => {
 
     return successResponse(res, {
         upgrades,
-        pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total,
-            pages: Math.ceil(total / limit),
-        },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) },
     });
 });
 
 const approveUpgrade = asyncHandler(async (req, res) => {
     const approval = await PendingApproval.findById(req.params.id);
     if (!approval) return errorResponse(res, 'Upgrade request not found', 404);
-    if (approval.status !== 'pending') return errorResponse(res, `Request is already ${approval.status}`, 400);
+    if (approval.status !== 'pending') return errorResponse(res, `Already ${approval.status}`, 400);
 
     const user = await User.findById(approval.user);
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -264,12 +223,18 @@ const approveUpgrade = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    const payment = await PaymentRecord.findOne({ user: user._id, type: 'upgrade' }).sort({ createdAt: -1 });
-    if (payment) {
-        payment.status = 'completed';
-        payment.verifiedBy = req.user.id;
-        payment.verifiedAt = new Date();
-        await payment.save();
+    const invoice = await Invoice.findOne({
+        user: user._id,
+        type: 'upgrade',
+        status: { $in: ['sent', 'paid'] },
+    }).sort({ createdAt: -1 });
+
+    if (invoice && invoice.status !== 'paid') {
+        invoice.status = 'paid';
+        invoice.amountPaid = invoice.amountDue;
+        invoice.amountDue = 0;
+        invoice.paidAt = new Date();
+        await invoice.save();
     }
 
     try {
@@ -283,8 +248,8 @@ const approveUpgrade = asyncHandler(async (req, res) => {
                 newPlan: approval.newPlan,
             });
         }
-    } catch (e) {
-        logger.error(`Upgrade approval notification failed: ${e.message}`);
+    } catch (err) {
+        logger.error(`Upgrade approval notification failed: ${err.message}`);
     }
 
     return successResponse(res, {
@@ -299,11 +264,11 @@ const approveUpgrade = asyncHandler(async (req, res) => {
 
 const rejectUpgrade = asyncHandler(async (req, res) => {
     const { reason } = req.body;
-    if (!reason) return errorResponse(res, 'Rejection reason is required', 400);
+    if (!reason) return errorResponse(res, 'Rejection reason required', 400);
 
     const approval = await PendingApproval.findById(req.params.id);
     if (!approval) return errorResponse(res, 'Upgrade request not found', 404);
-    if (approval.status !== 'pending') return errorResponse(res, `Request is already ${approval.status}`, 400);
+    if (approval.status !== 'pending') return errorResponse(res, `Already ${approval.status}`, 400);
 
     approval.status = 'rejected';
     approval.reviewedBy = req.user.id;
@@ -312,29 +277,15 @@ const rejectUpgrade = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    const payment = await PaymentRecord.findOne({ user: approval.user, type: 'upgrade' }).sort({ createdAt: -1 });
-    if (payment) {
-        payment.status = 'failed';
-        payment.verifiedBy = req.user.id;
-        payment.verifiedAt = new Date();
-        await payment.save();
-    }
-
     const user = await User.findById(approval.user);
     if (user) {
         try {
-            await emailService.send(user.email, 'farmerUpgradeRejected', {
-                user,
-                reason,
-            });
+            await emailService.send(user.email, 'farmerUpgradeRejected', { user, reason });
             if (user.phone) {
-                await smsService.send(user.phone, 'farmerUpgradeRejected', {
-                    user,
-                    reason,
-                });
+                await smsService.send(user.phone, 'farmerUpgradeRejected', { user, reason });
             }
-        } catch (e) {
-            logger.error(`Upgrade rejection notification failed: ${e.message}`);
+        } catch (err) {
+            logger.error(`Upgrade rejection notification failed: ${err.message}`);
         }
     }
 
