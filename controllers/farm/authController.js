@@ -9,16 +9,10 @@ const Admin = require('../../models/admin/Admin');
 const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
+const planService = require('../../services/planService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
-
-const PLAN_PRICES = {
-    'Basic Monthly': { price: 500, interval: 'monthly' },
-    'Basic': { price: 6000, interval: 'one_time' },
-    'Pro': { price: 10000, interval: 'one_time' },
-    'Full Suite': { price: 15000, interval: 'one_time' },
-};
 
 const generateToken = (user) => jwt.sign(
     { id: user._id, role: user.role },
@@ -32,7 +26,6 @@ const generateRefreshToken = (user) => jwt.sign(
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
 );
 
-/* ============ REGISTER ============ */
 const register = asyncHandler(async (req, res) => {
     const { name, email, phone, password, county, subCounty, plan } = req.body;
 
@@ -49,8 +42,8 @@ const register = asyncHandler(async (req, res) => {
     const existing = await User.findOne({ email });
     if (existing) return errorResponse(res, 'Email already registered', 400);
 
-    const planInfo = PLAN_PRICES[plan];
-    if (!planInfo) return errorResponse(res, 'Invalid plan', 400);
+    const planInfo = await planService.getByName(plan);
+    if (!planInfo) return errorResponse(res, 'Invalid or disabled plan', 400);
 
     const user = await User.create({
         name,
@@ -83,7 +76,8 @@ const register = asyncHandler(async (req, res) => {
         logger.error(`Invoice generation failed: ${err.message}`);
     }
 
-    // Email to farmer
+    const invoiceUrl = invoice ? `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}` : null;
+
     try {
         await emailService.send(email, 'farmerRegistrationPending', {
             user: { name, email, phone },
@@ -94,12 +88,31 @@ const register = asyncHandler(async (req, res) => {
             invoiceNumber: invoice?.invoiceNumber,
             dueDate: invoice?.dueDate,
             paymentInstructions: invoice?.paymentInstructions || [],
+            invoiceUrl,
         });
+        logger.info(`Registration email sent to ${email}`);
     } catch (err) {
         logger.error(`Registration email failed: ${err.message}`);
     }
 
-    // Admin notification
+    if (invoice) {
+        try {
+            await emailService.send(email, 'farmerInvoice', {
+                user: { name, email, phone },
+                invoiceNumber: invoice.invoiceNumber,
+                amount: invoice.amountDue,
+                currency: invoice.currency,
+                planName: plan,
+                dueDate: invoice.dueDate,
+                paymentInstructions: invoice.paymentInstructions || [],
+                invoiceUrl,
+            });
+            logger.info(`Invoice email sent to ${email}`);
+        } catch (err) {
+            logger.error(`Invoice email failed: ${err.message}`);
+        }
+    }
+
     try {
         const admins = await Admin.find({ isActive: true });
         for (const admin of admins) {
@@ -111,6 +124,7 @@ const register = asyncHandler(async (req, res) => {
                 invoiceNumber: invoice?.invoiceNumber,
             });
         }
+        logger.info(`Admin notification sent for ${email}`);
     } catch (err) {
         logger.error(`Admin notification failed: ${err.message}`);
     }
@@ -136,6 +150,7 @@ const register = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             status: invoice.status,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl,
         } : null,
         scope: 'pending',
         token,
@@ -143,7 +158,6 @@ const register = asyncHandler(async (req, res) => {
     }, 'Registration submitted. Awaiting payment.', 201);
 });
 
-/* ============ LOGIN ============ */
 const login = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return errorResponse(res, 'Email and password required', 400);
@@ -204,6 +218,7 @@ const login = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             status: invoice.status,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         } : null,
         scope,
         token,
@@ -211,7 +226,6 @@ const login = asyncHandler(async (req, res) => {
     }, 'Login successful');
 });
 
-/* ============ ME (pending page polling) ============ */
 const getMe = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password').lean();
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -248,12 +262,12 @@ const getMe = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             status: invoice.status,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         } : null,
         scope,
     });
 });
 
-/* ============ PROFILE ============ */
 const getProfile = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -295,7 +309,6 @@ const changePassword = asyncHandler(async (req, res) => {
     return successResponse(res, null, 'Password changed');
 });
 
-/* ============ FORGOT / RESET ============ */
 const forgotPassword = asyncHandler(async (req, res) => {
     const { email } = req.body;
     if (!email) return errorResponse(res, 'Email required', 400);

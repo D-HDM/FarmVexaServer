@@ -18,7 +18,6 @@ const pendingApprovalSchema = new mongoose.Schema({
     },
     plan: {
         type: String,
-        enum: ['Basic', 'Basic Monthly', 'Pro', 'Full Suite'],
     },
     oldPlan: {
         type: String,

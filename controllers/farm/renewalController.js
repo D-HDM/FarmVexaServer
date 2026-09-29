@@ -6,17 +6,11 @@ const Settings = require('../../models/admin/Settings');
 const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
+const planService = require('../../services/planService');
 const Admin = require('../../models/admin/Admin');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
-
-const PLAN_PRICES = {
-    'Basic Monthly': { price: 500, interval: 'monthly' },
-    'Basic': { price: 6000, interval: 'one_time' },
-    'Pro': { price: 10000, interval: 'one_time' },
-    'Full Suite': { price: 15000, interval: 'one_time' },
-};
 
 const getSubscriptionDetails = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password').lean();
@@ -53,11 +47,15 @@ const submitRenewal = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    if (!user.selectedPlan || !PLAN_PRICES[user.selectedPlan]) {
+    if (!user.selectedPlan) {
         return errorResponse(res, 'No plan to renew', 400);
     }
 
-    // Check for existing pending renewal invoice
+    const planInfo = await planService.getByName(user.selectedPlan);
+    if (!planInfo) {
+        return errorResponse(res, 'Plan no longer available. Please contact support.', 400);
+    }
+
     const existing = await Invoice.findOne({
         user: user._id,
         type: 'renewal',
@@ -67,11 +65,9 @@ const submitRenewal = asyncHandler(async (req, res) => {
         return errorResponse(res, `You already have a pending renewal invoice (${existing.invoiceNumber})`, 400);
     }
 
-    const planInfo = PLAN_PRICES[user.selectedPlan];
     const settings = await Settings.findOne();
     const dueHours = settings?.invoice?.dueHours || 3;
 
-    // Create invoice
     let invoice;
     try {
         const result = await invoiceService.generateInvoice({
@@ -88,7 +84,6 @@ const submitRenewal = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Failed to generate renewal invoice', 500);
     }
 
-    // Track renewal request
     await PendingApproval.create({
         user: user._id,
         type: 'renewal',
@@ -102,7 +97,6 @@ const submitRenewal = asyncHandler(async (req, res) => {
     user.subscriptionStatus = 'pending_renewal';
     await user.save();
 
-    // Notify farmer
     try {
         await emailService.send(user.email, 'farmerRenewalReceived', {
             user,
@@ -126,7 +120,6 @@ const submitRenewal = asyncHandler(async (req, res) => {
         logger.error(`Renewal email failed: ${err.message}`);
     }
 
-    // Notify admins
     try {
         const admins = await Admin.find({ isActive: true });
         for (const admin of admins) {
@@ -155,7 +148,6 @@ const submitRenewal = asyncHandler(async (req, res) => {
     }, 'Renewal invoice created. Please complete payment.', 201);
 });
 
-// Admin endpoints
 const getRenewalRequests = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
     const query = { type: 'renewal' };
@@ -195,7 +187,6 @@ const approveRenewal = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    // Mark invoice paid if exists
     const invoice = await Invoice.findOne({
         user: user._id,
         type: 'renewal',

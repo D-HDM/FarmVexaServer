@@ -26,41 +26,110 @@ const methodLabels = {
     manual: 'Manual Payment',
 };
 
+const renderInstructions = (paymentInstructions, invoiceUrl) => {
+    const list = Array.isArray(paymentInstructions) ? paymentInstructions : [];
+
+    if (list.length === 0) {
+        if (!invoiceUrl) return '';
+        return `
+            <div style="background:#eff6ff;padding:16px;border-radius:8px;margin:16px 0;border-left:4px solid #3b82f6;">
+                <p style="margin:0 0 8px 0;font-weight:700;color:#1e40af;">💳 Complete Your Payment</p>
+                <p style="margin:4px 0;font-size:13px;color:#1e40af;">Click the button below to view your invoice and choose a payment method.</p>
+                <div style="text-align:center;margin:14px 0 4px 0;">
+                    <a href="${invoiceUrl}" style="display:inline-block;background:#2d6a4f;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:bold;">
+                        View Invoice &amp; Pay
+                    </a>
+                </div>
+            </div>`;
+    }
+
+    return list.map((m) => {
+        if (!m) return '';
+
+        if (m.mode === 'auto' && m.action?.type === 'stk') {
+            const label = m.action.label || 'Pay with M-Pesa STK';
+            const button = invoiceUrl
+                ? `<div style="text-align:center;margin:14px 0 4px 0;">
+                       <a href="${invoiceUrl}" style="display:inline-block;background:#0369a1;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:bold;">
+                           📱 ${label}
+                       </a>
+                       <p style="margin:8px 0 0 0;font-size:12px;color:#0c4a6e;">You'll be asked for your M-Pesa phone number on the next page.</p>
+                   </div>`
+                : '';
+            return `
+                <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:10px 0;border-left:4px solid #0369a1;">
+                    <p style="margin:0 0 6px 0;font-weight:700;color:#0c4a6e;">⚡ ${m.title || 'M-Pesa STK Push'}</p>
+                    ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#0c4a6e;">${m.description}</p>` : ''}
+                    ${button}
+                </div>`;
+        }
+
+        if (m.mode === 'auto' && m.action?.type === 'stripe') {
+            const label = m.action.label || 'Pay with Card';
+            const button = invoiceUrl
+                ? `<div style="text-align:center;margin:14px 0 4px 0;">
+                       <a href="${invoiceUrl}" style="display:inline-block;background:#635bff;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:bold;">
+                           💳 ${label}
+                       </a>
+                   </div>`
+                : '';
+            return `
+                <div style="background:#f5f3ff;padding:16px;border-radius:8px;margin:10px 0;border-left:4px solid #635bff;">
+                    <p style="margin:0 0 6px 0;font-weight:700;color:#4c1d95;">${m.title || 'Card Payment'}</p>
+                    ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#4c1d95;">${m.description}</p>` : ''}
+                    ${button}
+                </div>`;
+        }
+
+        if (m.mode === 'auto' && invoiceUrl) {
+            return `
+                <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:10px 0;border-left:4px solid #0369a1;">
+                    <p style="margin:0 0 6px 0;font-weight:700;color:#0c4a6e;">${m.title || 'Online Payment'}</p>
+                    ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#0c4a6e;">${m.description}</p>` : ''}
+                    <div style="text-align:center;margin:14px 0 4px 0;">
+                        <a href="${invoiceUrl}" style="display:inline-block;background:#0369a1;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:bold;">
+                            ${m.action?.label || 'Pay Now'}
+                        </a>
+                    </div>
+                </div>`;
+        }
+
+        if (m.mode === 'manual') {
+            const steps = Array.isArray(m.steps) ? m.steps : [];
+            return `
+                <div style="background:#f0f9ff;padding:14px;border-radius:8px;margin:10px 0;border-left:4px solid #0369a1;">
+                    <p style="margin:0 0 6px 0;font-weight:700;color:#0c4a6e;">${m.title || 'Manual Payment'}</p>
+                    ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#0c4a6e;">${m.description}</p>` : ''}
+                    ${steps.length ? `<ol style="margin:6px 0 0 0;padding-left:20px;font-size:13px;color:#0c4a6e;">${steps.map((s) => `<li>${s}</li>`).join('')}</ol>` : ''}
+                </div>`;
+        }
+
+        return '';
+    }).join('');
+};
+
 /* ============ FARMER — REGISTRATION ============ */
 
 const farmerRegistrationPending = async (user, data, settings) => {
     const phone = settings?.system?.supportPhone || '+254700000000';
     const email = settings?.system?.supportEmail || 'support@farmvexa.com';
 
-    const instructionsHTML = (data.paymentInstructions || []).map((m) => `
-        <div style="background:#f0f9ff;padding:14px;border-radius:8px;margin:10px 0;border-left:4px solid #0369a1;">
-            <p style="margin:0 0 6px 0;font-weight:700;color:#0c4a6e;">${m.title || ''}</p>
-            ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#0c4a6e;">${m.description}</p>` : ''}
-            ${m.steps ? `<ol style="margin:6px 0 0 0;padding-left:20px;font-size:13px;color:#0c4a6e;">${m.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
-        </div>
-    `).join('');
+    const instructionsHTML = renderInstructions(data.paymentInstructions, data.invoiceUrl);
 
     return {
         subject: '⏳ Your FarmVexa registration is under review',
         html: baseTemplate(`
             <h2>Registration Received!</h2>
             <p>Hello <strong>${user.name || data.name}</strong>,</p>
-            <p>Your FarmVexa registration has been received and is now under review.</p>
+            <p>Your FarmVexa registration has been received. Please complete payment to activate your account.</p>
 
             <div style="background:#f0fdf4;padding:16px;border-radius:8px;margin:16px 0;">
                 <h3 style="margin:0 0 8px 0;">📋 Registration Details</h3>
                 <div class="data-row"><span class="data-label">Plan:</span><span class="data-value">${data.planName || 'N/A'}</span></div>
                 <div class="data-row"><span class="data-label">Amount:</span><span class="data-value">KES ${data.amount || 0} (${data.interval || 'one-time'})</span></div>
-                ${data.paymentMethod ? `<div class="data-row"><span class="data-label">Payment Method:</span><span class="data-value">${methodLabels[data.paymentMethod] || data.paymentMethod}</span></div>` : ''}
                 ${data.invoiceNumber ? `<div class="data-row"><span class="data-label">Invoice:</span><span class="data-value mono">${data.invoiceNumber}</span></div>` : ''}
                 ${data.dueDate ? `<div class="data-row"><span class="data-label">Pay Before:</span><span class="data-value">${new Date(data.dueDate).toLocaleString('en-KE')}</span></div>` : ''}
             </div>
-
-            ${instructionsHTML ? `
-            <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:16px 0;">
-                <h3 style="margin:0 0 8px 0;">💳 How to Pay</h3>
-                ${instructionsHTML}
-            </div>` : ''}
 
             <div style="background:#eff6ff;padding:16px;border-radius:8px;margin:16px 0;">
                 <h3 style="margin:0 0 8px 0;">👤 Your Details</h3>
@@ -69,6 +138,12 @@ const farmerRegistrationPending = async (user, data, settings) => {
                 <div class="data-row"><span class="data-label">Phone:</span><span class="data-value">${user.phone || data.phone}</span></div>
                 ${data.county ? `<div class="data-row"><span class="data-label">Location:</span><span class="data-value">${data.county}, ${data.subCounty || ''}</span></div>` : ''}
             </div>
+
+            ${instructionsHTML ? `
+            <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">💳 How to Pay</h3>
+                ${instructionsHTML}
+            </div>` : ''}
 
             <div style="background:#fefce8;padding:16px;border-radius:8px;margin:16px 0;">
                 <h3 style="margin:0 0 8px 0;">⏳ What Happens Next</h3>
@@ -164,19 +239,13 @@ const farmerRejected = async (user, data, settings) => {
     };
 };
 
-/* ============ FARMER — INVOICE + PAYMENT (NEW) ============ */
+/* ============ FARMER — INVOICE + PAYMENT ============ */
 
 const farmerInvoice = async (user, data, settings) => {
     const phone = settings?.system?.supportPhone || '+254700000000';
     const email = settings?.system?.supportEmail || 'support@farmvexa.com';
 
-    const instructionsHTML = (data.paymentInstructions || []).map((m) => `
-        <div style="background:#f0f9ff;padding:14px;border-radius:8px;margin:10px 0;border-left:4px solid #0369a1;">
-            <p style="margin:0 0 6px 0;font-weight:700;color:#0c4a6e;">${m.title || ''}</p>
-            ${m.description ? `<p style="margin:4px 0;font-size:13px;color:#0c4a6e;">${m.description}</p>` : ''}
-            ${m.steps ? `<ol style="margin:6px 0 0 0;padding-left:20px;font-size:13px;color:#0c4a6e;">${m.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
-        </div>
-    `).join('');
+    const instructionsHTML = renderInstructions(data.paymentInstructions, data.invoiceUrl);
 
     return {
         subject: `📄 Invoice ${data.invoiceNumber} — FarmVexa`,
@@ -192,7 +261,11 @@ const farmerInvoice = async (user, data, settings) => {
                 <div class="data-row"><span class="data-label">Due:</span><span class="data-value">${data.dueDate ? new Date(data.dueDate).toLocaleString('en-KE') : 'N/A'}</span></div>
             </div>
 
-            ${instructionsHTML ? `<h3>How to pay</h3>${instructionsHTML}` : '<p>Contact support for payment methods.</p>'}
+            ${instructionsHTML ? `
+            <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">💳 Payment Options</h3>
+                ${instructionsHTML}
+            </div>` : ''}
 
             <p style="margin-top:15px;font-size:13px;color:#777;">Need help? 📞 ${phone} | 📧 ${email}</p>
         `, settings),
@@ -227,6 +300,7 @@ const farmerPaymentReceived = async (user, data, settings) => {
 
 const farmerInvoiceReminder = async (user, data, settings) => {
     const phone = settings?.system?.supportPhone || '+254700000000';
+    const instructionsHTML = renderInstructions(data.paymentInstructions, data.invoiceUrl);
     return {
         subject: `⏰ Invoice ${data.invoiceNumber} due soon`,
         html: baseTemplate(`
@@ -238,6 +312,7 @@ const farmerInvoiceReminder = async (user, data, settings) => {
             <div class="data-row"><span class="data-label">Amount Due:</span><span class="data-value">KES ${data.amount || 0}</span></div>
             <div class="data-row"><span class="data-label">Due:</span><span class="data-value">${data.dueDate ? new Date(data.dueDate).toLocaleString('en-KE') : 'N/A'}</span></div>
             <p>Please complete payment to avoid cancellation.</p>
+            ${instructionsHTML}
             <p style="margin-top:15px;font-size:13px;color:#777;">Need help? 📞 ${phone}</p>
         `, settings),
     };
@@ -248,6 +323,8 @@ const farmerInvoiceReminder = async (user, data, settings) => {
 const farmerRenewalReceived = async (user, data, settings) => {
     const phone = settings?.system?.supportPhone || '+254700000000';
     const email = settings?.system?.supportEmail || 'support@farmvexa.com';
+
+    const instructionsHTML = renderInstructions(data.paymentInstructions, data.invoiceUrl);
 
     return {
         subject: '🔄 Renewal Received — FarmVexa',
@@ -264,6 +341,12 @@ const farmerRenewalReceived = async (user, data, settings) => {
                 ${data.dueDate ? `<div class="data-row"><span class="data-label">Pay Before:</span><span class="data-value">${new Date(data.dueDate).toLocaleString('en-KE')}</span></div>` : ''}
                 ${data.previousExpiry ? `<div class="data-row"><span class="data-label">Previous Expiry:</span><span class="data-value">${new Date(data.previousExpiry).toLocaleDateString('en-KE')}</span></div>` : ''}
             </div>
+
+            ${instructionsHTML ? `
+            <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">💳 How to Pay</h3>
+                ${instructionsHTML}
+            </div>` : ''}
 
             <p style="margin-top:15px;font-size:13px;color:#777;">Need help? 📞 ${phone} | 📧 ${email}</p>
         `, settings),
@@ -312,6 +395,7 @@ const farmerRenewalRejected = async (user, data, settings) => {
 
 const farmerUpgradeReceived = async (user, data, settings) => {
     const phone = settings?.system?.supportPhone || '+254700000000';
+    const instructionsHTML = renderInstructions(data.paymentInstructions, data.invoiceUrl);
     return {
         subject: `⬆️ Upgrade Request Received — ${data.newPlan}`,
         html: baseTemplate(`
@@ -326,6 +410,12 @@ const farmerUpgradeReceived = async (user, data, settings) => {
                 ${data.invoiceNumber ? `<div class="data-row"><span class="data-label">Invoice:</span><span class="data-value mono">${data.invoiceNumber}</span></div>` : ''}
                 ${data.dueDate ? `<div class="data-row"><span class="data-label">Pay Before:</span><span class="data-value">${new Date(data.dueDate).toLocaleString('en-KE')}</span></div>` : ''}
             </div>
+
+            ${instructionsHTML ? `
+            <div style="background:#f0f9ff;padding:16px;border-radius:8px;margin:16px 0;">
+                <h3 style="margin:0 0 8px 0;">💳 How to Pay</h3>
+                ${instructionsHTML}
+            </div>` : ''}
 
             <p style="margin-top:15px;font-size:13px;color:#777;">Need help? 📞 ${phone}</p>
         `, settings),
@@ -472,7 +562,7 @@ const farmerDailyReport = async (user, data, settings) => {
         html: baseTemplate(`
             <h2>📊 Daily Farm Report</h2>
             <p>Your farm summary for ${new Date().toLocaleDateString('en-KE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-            
+
             <div style="background:#f0fdf4;padding:16px;border-radius:8px;margin:16px 0;">
                 <h3 style="margin:0 0 8px 0;">🌤️ Weather</h3>
                 <div class="data-row"><span class="data-label">Temperature:</span><span class="data-value">${data.avgTemp || 'N/A'}°C</span></div>
@@ -708,37 +798,27 @@ const adminWeeklyReport = async (user, data, settings) => ({
 /* ============ EXPORTS ============ */
 
 module.exports = {
-    // Registration
     farmerRegistrationPending, farmerApproved, farmerRejected, farmerAutoRejected,
 
-    // Invoice + Payment
     farmerInvoice, farmerPaymentReceived, farmerInvoiceReminder,
 
-    // Renewal
     farmerRenewalReceived, farmerRenewalApproved, farmerRenewalRejected,
 
-    // Upgrade
     farmerUpgradeReceived, farmerUpgradeApproved, farmerUpgradeRejected,
 
-    // Account
     farmerWelcome, farmerEmailVerify, farmerPasswordReset,
 
-    // Alerts
     farmerAlertHigh, farmerAlertMedium, farmerDiseaseDetected, farmerDeviceOffline,
 
-    // Reports
     farmerDailyReport, farmerWeeklyReport, farmerNewDeviceLogin,
     farmerVaccinationDue, farmerLivestockAlert, farmerLowStock,
     farmerMaintenanceDue, farmerWeatherAlert, farmerTaskOverdue,
     farmerReminderUpcoming, farmerReminderFinal,
 
-    // Field Scan + Storage
     farmerFieldScanResults, farmerStorageAlert,
 
-    // Team + Market
     teamMemberAdded, marketInquiryEmail,
 
-    // Admin
     adminNewFarmer, adminPaymentReceived, adminRenewalRequest, adminUpgradeRequest,
     adminSystemCritical, adminGeminiEightyPercent, adminGeminiExceeded,
     adminPythonOffline, adminDeviceOffline24h, adminTrainingComplete,

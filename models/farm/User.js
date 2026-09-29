@@ -62,16 +62,14 @@ const userSchema = new mongoose.Schema({
     },
     rejectedAt: Date,
     rejectionReason: String,
-    
-    // === SUBSCRIPTION + PLAN FIELDS ===
+
     selectedPlan: {
         type: String,
-        enum: ['Basic', 'Basic Monthly', 'Pro', 'Full Suite'],
         default: 'Basic',
     },
     planInterval: {
         type: String,
-        enum: ['one_time', 'monthly'],
+        enum: ['one_time', 'monthly', 'daily', 'weekly', 'quarterly', 'yearly'],
         default: 'one_time',
     },
     planPrice: {
@@ -93,11 +91,10 @@ const userSchema = new mongoose.Schema({
         default: null,
     },
     paymentDate: Date,
-    
-    // === SUBSCRIPTION LIFECYCLE ===
+
     subscriptionExpiry: {
         type: Date,
-        default: null, // null = lifetime (one-time plans)
+        default: null,
     },
     subscriptionStatus: {
         type: String,
@@ -113,8 +110,8 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null,
     },
-    lastRenewalReminder: Date, 
-    
+    lastRenewalReminder: Date,
+
     resetPasswordToken: String,
     resetPasswordExpire: Date,
     lastLogin: Date,
@@ -122,14 +119,12 @@ const userSchema = new mongoose.Schema({
     timestamps: true,
 });
 
-
 userSchema.methods.activateSubscription = function (durationDays = 30) {
     this.subscriptionStartDate = new Date();
     this.subscriptionExpiry = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
     this.subscriptionStatus = 'active';
     return this.save();
 };
-
 
 userSchema.methods.renewSubscription = function (durationDays = 30) {
     const baseDate = this.subscriptionExpiry && new Date() < new Date(this.subscriptionExpiry)
@@ -142,9 +137,8 @@ userSchema.methods.renewSubscription = function (durationDays = 30) {
     return this.save();
 };
 
-
 userSchema.methods.isSubscriptionExpired = function () {
-    if (!this.subscriptionExpiry) return false; // Lifetime
+    if (!this.subscriptionExpiry) return false;
     return new Date() > new Date(this.subscriptionExpiry);
 };
 

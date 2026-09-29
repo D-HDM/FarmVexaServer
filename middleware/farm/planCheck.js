@@ -1,94 +1,59 @@
 const { errorResponse } = require('../../utils/response');
+const planService = require('../../services/planService');
+const logger = require('../../utils/logger');
 
-// Feature access per plan
-const planFeatures = {
+const DEFAULT_FEATURES = {
     'Basic': [
-        'crop_scan',
-        'field_scan_manual',
-        'livestock',
-        'health',
-        'production',
-        'inventory',
-        'finance',
-        'weather',
-        'ai_chat',
-        'team',
-        'market',
-        'reports',
-        'alerts',
+        'crop_scan', 'field_scan_manual', 'livestock', 'health', 'production',
+        'inventory', 'finance', 'weather', 'ai_chat', 'team', 'market', 'reports', 'alerts',
     ],
     'Basic Monthly': [
-        'crop_scan',
-        'field_scan_manual',
-        'livestock',
-        'health',
-        'production',
-        'inventory',
-        'finance',
-        'weather',
-        'ai_chat',
-        'team',
-        'market',
-        'reports',
-        'alerts',
+        'crop_scan', 'field_scan_manual', 'livestock', 'health', 'production',
+        'inventory', 'finance', 'weather', 'ai_chat', 'team', 'market', 'reports', 'alerts',
     ],
     'Pro': [
-        'crop_scan',
-        'field_scan',
-        'field_scan_manual',
-        'livestock',
-        'health',
-        'production',
-        'inventory',
-        'finance',
-        'weather',
-        'ai_chat',
-        'team',
-        'market',
-        'reports',
-        'alerts',
-        'iot_field_sensors',
-        'field_scan_gps',
+        'crop_scan', 'field_scan', 'field_scan_manual', 'livestock', 'health', 'production',
+        'inventory', 'finance', 'weather', 'ai_chat', 'team', 'market', 'reports', 'alerts',
+        'iot_field_sensors', 'field_scan_gps',
     ],
     'Full Suite': [
-        'crop_scan',
-        'field_scan',
-        'field_scan_manual',
-        'livestock',
-        'health',
-        'production',
-        'inventory',
-        'finance',
-        'weather',
-        'ai_chat',
-        'team',
-        'market',
-        'reports',
-        'alerts',
-        'iot_field_sensors',
-        'field_scan_gps',
-        'storage_monitoring',
-        'co2_detection',
-        'pir_detection',
+        'crop_scan', 'field_scan', 'field_scan_manual', 'livestock', 'health', 'production',
+        'inventory', 'finance', 'weather', 'ai_chat', 'team', 'market', 'reports', 'alerts',
+        'iot_field_sensors', 'field_scan_gps', 'storage_monitoring', 'co2_detection', 'pir_detection',
     ],
 };
 
 const planCheck = (feature) => {
     return async (req, res, next) => {
-        const user = req.user;
-        const plan = user.selectedPlan || 'Basic';
-        const allowedFeatures = planFeatures[plan] || planFeatures['Basic'];
+        try {
+            const user = req.user;
+            const planName = user.selectedPlan || 'Basic';
 
-        if (!allowedFeatures.includes(feature)) {
-            return errorResponse(
-                res,
-                `Your plan (${plan}) does not include this feature. Upgrade to access.`,
-                403
-            );
+            let features = null;
+            try {
+                const plan = await planService.getByName(planName);
+                if (plan?.features?.length) features = plan.features;
+            } catch (err) {
+                logger.warn(`planCheck DB lookup failed: ${err.message}`);
+            }
+
+            if (!features) {
+                features = DEFAULT_FEATURES[planName] || DEFAULT_FEATURES['Basic'];
+            }
+
+            if (!features.includes(feature)) {
+                return errorResponse(
+                    res,
+                    `Your plan (${planName}) does not include this feature. Upgrade to access.`,
+                    403
+                );
+            }
+
+            next();
+        } catch (err) {
+            return errorResponse(res, 'Plan check failed', 500);
         }
-
-        next();
     };
 };
 
-module.exports = { planCheck, planFeatures };
+module.exports = { planCheck, DEFAULT_FEATURES };

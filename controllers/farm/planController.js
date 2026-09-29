@@ -1,28 +1,20 @@
 const User = require('../../models/farm/User');
 const Invoice = require('../../models/admin/Invoice');
 const PendingApproval = require('../../models/admin/PendingApproval');
-const Settings = require('../../models/admin/Settings');
 const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
+const planService = require('../../services/planService');
 const Admin = require('../../models/admin/Admin');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
-const planPrices = {
-    'Basic Monthly': { price: 500, interval: 'monthly', order: 1 },
-    'Basic': { price: 6000, interval: 'one_time', order: 2 },
-    'Pro': { price: 10000, interval: 'one_time', order: 3 },
-    'Full Suite': { price: 15000, interval: 'one_time', order: 4 },
-};
-
 const getPlans = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password').lean();
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    const currentPlan = user.selectedPlan || null;
-    const currentPlanPrice = planPrices[currentPlan]?.price || 0;
+    const { currentPlan, currentPrice, plans } = await planService.getPlansForUser(user);
 
     const pendingUpgrade = await PendingApproval.findOne({
         user: user._id,
@@ -30,34 +22,9 @@ const getPlans = asyncHandler(async (req, res) => {
         status: 'pending',
     }).lean();
 
-    const plans = Object.keys(planPrices).map((name) => {
-        const planInfo = planPrices[name];
-        const upgradeCost = Math.max(0, planInfo.price - currentPlanPrice);
-
-        let status = 'available';
-        if (name === currentPlan) status = 'current';
-        else if (currentPlan === 'Full Suite') status = 'purchased';
-        else if (currentPlan === 'Pro' && (name === 'Basic' || name === 'Basic Monthly')) status = 'purchased';
-        else if (currentPlan === 'Basic' && name === 'Basic Monthly') status = 'purchased';
-        else if (currentPlan === 'Basic Monthly' && name === 'Basic') status = 'upgrade_available';
-        else if ((currentPlan === 'Basic' || currentPlan === 'Basic Monthly') && (name === 'Pro' || name === 'Full Suite')) status = 'upgrade_available';
-        else if (currentPlan === 'Pro' && name === 'Full Suite') status = 'upgrade_available';
-
-        return {
-            name,
-            price: planInfo.price,
-            interval: planInfo.interval,
-            order: planInfo.order,
-            status,
-            upgradeCost: status === 'upgrade_available' ? upgradeCost : 0,
-        };
-    });
-
-    plans.sort((a, b) => a.order - b.order);
-
     return successResponse(res, {
         currentPlan,
-        currentPlanPrice,
+        currentPlanPrice: currentPrice,
         pendingUpgrade: pendingUpgrade ? {
             id: pendingUpgrade._id,
             oldPlan: pendingUpgrade.oldPlan,
@@ -76,8 +43,12 @@ const submitUpgrade = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    const currentPlanPrice = planPrices[user.selectedPlan]?.price || 0;
-    const newPlanPrice = planPrices[newPlan]?.price || 0;
+    const newPlanDoc = await planService.getByName(newPlan);
+    if (!newPlanDoc) return errorResponse(res, 'Invalid or disabled plan', 400);
+
+    const currentPlanDoc = user.selectedPlan ? await planService.getByName(user.selectedPlan) : null;
+    const currentPlanPrice = currentPlanDoc?.price || 0;
+    const newPlanPrice = newPlanDoc.price;
 
     if (newPlanPrice <= currentPlanPrice) {
         return errorResponse(res, 'Cannot upgrade to same or lower plan', 400);
@@ -92,7 +63,6 @@ const submitUpgrade = asyncHandler(async (req, res) => {
 
     const upgradeAmount = newPlanPrice - currentPlanPrice;
 
-    // Create invoice
     let invoice;
     try {
         const result = await invoiceService.generateInvoice({
@@ -100,7 +70,7 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             user,
             plan: newPlan,
             planPrice: upgradeAmount,
-            planInterval: planPrices[newPlan].interval,
+            planInterval: newPlanDoc.interval,
             type: 'upgrade',
         });
         invoice = result.invoice;
@@ -173,7 +143,6 @@ const submitUpgrade = asyncHandler(async (req, res) => {
     }, 'Upgrade invoice created. Please complete payment.', 201);
 });
 
-// Admin endpoints
 const getUpgradeRequests = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
     const query = { type: 'upgrade' };
@@ -203,13 +172,16 @@ const approveUpgrade = asyncHandler(async (req, res) => {
     const user = await User.findById(approval.user);
     if (!user) return errorResponse(res, 'User not found', 404);
 
+    const newPlanDoc = await planService.getByName(approval.newPlan);
+    if (!newPlanDoc) return errorResponse(res, 'Plan no longer available', 400);
+
     user.selectedPlan = approval.newPlan;
-    user.planInterval = planPrices[approval.newPlan]?.interval || 'one_time';
-    user.planPrice = planPrices[approval.newPlan]?.price || 0;
+    user.planInterval = newPlanDoc.interval || 'one_time';
+    user.planPrice = newPlanDoc.price || 0;
     user.subscriptionStatus = 'active';
     user.isActive = true;
 
-    if (approval.newPlan === 'Basic Monthly') {
+    if (newPlanDoc.interval === 'monthly') {
         user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     } else {
         user.subscriptionExpiry = null;
