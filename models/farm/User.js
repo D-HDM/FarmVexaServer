@@ -83,7 +83,7 @@ const userSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['mpesa_stk', 'mpesa_send_money', 'mpesa_till', 'mpesa_paybill', 'bank', 'card', 'manual', null],
+        enum: ['mpesa_stk', 'mpesa_send_money', 'mpesa_till', 'mpesa_paybill', 'bank', 'cash', 'card', 'manual', 'invoice', null],
         default: null,
     },
     paymentReference: {

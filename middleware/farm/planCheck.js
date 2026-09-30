@@ -1,5 +1,6 @@
 const { errorResponse } = require('../../utils/response');
 const planService = require('../../services/planService');
+const { normalizeFeatures } = require('../../utils/featureKeys');
 const logger = require('../../utils/logger');
 
 const FALLBACK_FEATURES = {
@@ -18,12 +19,14 @@ const planCheck = (feature) => {
             let features = null;
             try {
                 const plan = await planService.getByName(planName);
-                if (plan?.features?.length) features = plan.features;
+                if (plan?.features?.length) {
+                    features = normalizeFeatures(plan.features);
+                }
             } catch (err) {
                 logger.warn(`planCheck DB lookup failed: ${err.message}`);
             }
 
-            if (!features) {
+            if (!features || features.length === 0) {
                 features = FALLBACK_FEATURES[planName] || FALLBACK_FEATURES['Basic'];
             }
 

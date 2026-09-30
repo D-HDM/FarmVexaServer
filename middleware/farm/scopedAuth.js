@@ -24,11 +24,10 @@ const scopedAuth = asyncHandler(async (req, res, next) => {
     if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) scope = 'expired';
 
     let invoice = null;
-    if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
-        invoice = await Invoice.findOne({
-            user: user._id,
-            status: { $in: ['sent', 'draft'] },
-        }).sort({ createdAt: -1 }).lean();
+    if (scope === 'pending' || scope === 'expired' || user.paymentStatus !== 'paid') {
+        invoice = await Invoice.findOne({ user: user._id })
+            .sort({ createdAt: -1 })
+            .lean();
     }
 
     req.user = user;

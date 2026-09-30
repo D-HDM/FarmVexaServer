@@ -96,6 +96,8 @@ const submitRenewal = asyncHandler(async (req, res) => {
     user.subscriptionStatus = 'pending_renewal';
     await user.save();
 
+    const invoiceUrl = `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`;
+
     try {
         await emailService.send(user.email, 'farmerRenewalReceived', {
             user,
@@ -106,7 +108,7 @@ const submitRenewal = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
             previousExpiry: user.subscriptionExpiry,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
+            invoiceUrl,
         });
         if (user.phone) {
             await smsService.send(user.phone, 'farmerRenewalReceived', {
@@ -118,6 +120,22 @@ const submitRenewal = asyncHandler(async (req, res) => {
         }
     } catch (err) {
         logger.error(`Renewal email failed: ${err.message}`);
+    }
+
+    try {
+        await emailService.send(user.email, 'farmerInvoice', {
+            user,
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.amountDue,
+            currency: invoice.currency,
+            planName: user.selectedPlan,
+            dueDate: invoice.dueDate,
+            paymentInstructions: invoice.paymentInstructions || [],
+            invoiceUrl,
+        });
+        logger.info(`Renewal invoice email sent to ${user.email}`);
+    } catch (err) {
+        logger.error(`Renewal invoice email failed: ${err.message}`);
     }
 
     try {
@@ -144,7 +162,7 @@ const submitRenewal = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             status: invoice.status,
             paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
+            invoiceUrl,
         },
     }, 'Renewal invoice created. Please complete payment.', 201);
 });

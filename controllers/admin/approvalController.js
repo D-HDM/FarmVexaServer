@@ -2,6 +2,7 @@ const User = require('../../models/farm/User');
 const PendingApproval = require('../../models/admin/PendingApproval');
 const Invoice = require('../../models/admin/Invoice');
 const Payment = require('../../models/admin/Payment');
+const Admin = require('../../models/admin/Admin');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const planService = require('../../services/planService');
@@ -13,8 +14,9 @@ const logger = require('../../utils/logger');
 /* ============ LIST PENDING APPROVALS ============ */
 const getPendingApprovals = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
+    const query = { status: 'pending', type: 'registration' };
 
-    const approvals = await PendingApproval.find({ status: 'pending' })
+    const approvals = await PendingApproval.find(query)
         .populate('user', 'name email phone county subCounty createdAt selectedPlan planInterval planPrice paymentStatus paymentMethod paymentReference')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
@@ -33,7 +35,7 @@ const getPendingApprovals = asyncHandler(async (req, res) => {
         })
     );
 
-    const total = await PendingApproval.countDocuments({ status: 'pending' });
+    const total = await PendingApproval.countDocuments(query);
 
     return successResponse(res, {
         approvals: approvalsWithPayment,
@@ -194,13 +196,15 @@ const confirmPayment = asyncHandler(async (req, res) => {
     await user.save();
 
     if (invoices.length > 0) {
+        const primaryInvoice = invoices[0];
+
         try {
             await emailService.send(user.email, 'farmerPaymentReceived', {
                 user,
                 name: user.name,
-                invoiceNumber: invoices[0].invoiceNumber,
-                amount: invoices[0].total,
-                currency: invoices[0].currency,
+                invoiceNumber: primaryInvoice.invoiceNumber,
+                amount: primaryInvoice.total,
+                currency: primaryInvoice.currency,
                 paidAt: new Date(),
                 paymentMethod: method || 'manual',
                 paymentReference: reference || 'N/A',
@@ -208,12 +212,29 @@ const confirmPayment = asyncHandler(async (req, res) => {
             if (user.phone) {
                 await smsService.send(user.phone, 'farmerPaymentReceived', {
                     user,
-                    invoiceNumber: invoices[0].invoiceNumber,
-                    amount: invoices[0].total,
+                    invoiceNumber: primaryInvoice.invoiceNumber,
+                    amount: primaryInvoice.total,
                 });
             }
         } catch (err) {
             logger.error(`Payment confirmation notification failed: ${err.message}`);
+        }
+
+        try {
+            const admins = await Admin.find({ isActive: true });
+            for (const admin of admins) {
+                await emailService.send(admin.email, 'adminPaymentReceived', {
+                    user: { name: admin.name, email: admin.email },
+                    farmer: { name: user.name, email: user.email, phone: user.phone },
+                    invoiceNumber: primaryInvoice.invoiceNumber,
+                    planName: primaryInvoice.plan,
+                    amount: primaryInvoice.total,
+                    paymentMethod: method || 'manual',
+                    reference: reference || 'N/A',
+                });
+            }
+        } catch (err) {
+            logger.error(`Admin payment notification failed: ${err.message}`);
         }
     }
 

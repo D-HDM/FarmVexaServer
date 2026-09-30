@@ -3,6 +3,7 @@ const PaymentModel = require('../../models/admin/PaymentModel');
 const Admin = require('../../models/admin/Admin');
 const Document = require('../../models/admin/Document');
 const paymentInstructionsService = require('../../services/paymentInstructionsService');
+const { normalizeFeatures } = require('../../utils/featureKeys');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
@@ -63,7 +64,7 @@ const getPublicSettings = asyncHandler(async (req, res) => {
             price: p.price,
             currency: p.currency,
             interval: p.interval,
-            features: p.features,
+            features: normalizeFeatures(p.features),
             maxFarms: p.maxFarms,
             maxDevices: p.maxDevices,
             aiRequestsPerDay: p.aiRequestsPerDay,
@@ -133,7 +134,7 @@ const getChatbotSettings = asyncHandler(async (req, res) => {
             price: p.price,
             currency: p.currency,
             interval: p.interval,
-            features: p.features,
+            features: normalizeFeatures(p.features),
             maxFarms: p.maxFarms,
             maxDevices: p.maxDevices,
             aiRequestsPerDay: p.aiRequestsPerDay,

@@ -6,6 +6,7 @@ const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const planService = require('../../services/planService');
 const { expiryFromInterval } = require('../../utils/planDuration');
+const { normalizeFeatures } = require('../../utils/featureKeys');
 const Admin = require('../../models/admin/Admin');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -16,6 +17,11 @@ const getPlans = asyncHandler(async (req, res) => {
     if (!user) return errorResponse(res, 'User not found', 404);
 
     const { currentPlan, currentPrice, plans } = await planService.getPlansForUser(user);
+
+    const normalizedPlans = plans.map((p) => ({
+        ...p,
+        features: normalizeFeatures(p.features),
+    }));
 
     const pendingUpgrade = await PendingApproval.findOne({
         user: user._id,
@@ -34,7 +40,7 @@ const getPlans = asyncHandler(async (req, res) => {
             paymentReference: pendingUpgrade.paymentReference,
             submittedAt: pendingUpgrade.createdAt,
         } : null,
-        plans,
+        plans: normalizedPlans,
     });
 });
 
@@ -93,6 +99,8 @@ const submitUpgrade = asyncHandler(async (req, res) => {
         paymentReference: invoice.invoiceNumber,
     });
 
+    const invoiceUrl = `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`;
+
     try {
         await emailService.send(user.email, 'farmerUpgradeReceived', {
             user,
@@ -103,7 +111,7 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             invoiceNumber: invoice.invoiceNumber,
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
+            invoiceUrl,
         });
         if (user.phone) {
             await smsService.send(user.phone, 'farmerUpgradeReceived', {
@@ -116,6 +124,22 @@ const submitUpgrade = asyncHandler(async (req, res) => {
         }
     } catch (err) {
         logger.error(`Upgrade email failed: ${err.message}`);
+    }
+
+    try {
+        await emailService.send(user.email, 'farmerInvoice', {
+            user,
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.amountDue,
+            currency: invoice.currency,
+            planName: newPlan,
+            dueDate: invoice.dueDate,
+            paymentInstructions: invoice.paymentInstructions || [],
+            invoiceUrl,
+        });
+        logger.info(`Upgrade invoice email sent to ${user.email}`);
+    } catch (err) {
+        logger.error(`Upgrade invoice email failed: ${err.message}`);
     }
 
     try {
@@ -142,7 +166,7 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             currency: invoice.currency,
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
+            invoiceUrl,
         },
     }, 'Upgrade invoice created. Please complete payment.', 201);
 });
@@ -179,18 +203,23 @@ const approveUpgrade = asyncHandler(async (req, res) => {
     const newPlanDoc = await planService.getByName(approval.newPlan);
     if (!newPlanDoc) return errorResponse(res, 'Plan no longer available', 400);
 
+    const now = new Date();
+    const isLifetime = newPlanDoc.interval === 'one_time' || newPlanDoc.interval === 'once';
+
     user.selectedPlan = approval.newPlan;
     user.planInterval = newPlanDoc.interval || 'one_time';
     user.planPrice = newPlanDoc.price || 0;
     user.subscriptionStatus = 'active';
     user.isActive = true;
 
-    const now = new Date();
-    const currentExpiry = user.subscriptionExpiry ? new Date(user.subscriptionExpiry) : null;
-    const isFutureExpiry = currentExpiry && currentExpiry > now;
-
-    if (!isFutureExpiry) {
-        user.subscriptionExpiry = expiryFromInterval(newPlanDoc.interval, now);
+    if (isLifetime) {
+        user.subscriptionExpiry = null;
+    } else {
+        const currentExpiry = user.subscriptionExpiry ? new Date(user.subscriptionExpiry) : null;
+        const isFutureExpiry = currentExpiry && currentExpiry > now;
+        if (!isFutureExpiry) {
+            user.subscriptionExpiry = expiryFromInterval(newPlanDoc.interval, now);
+        }
     }
 
     await user.save();
@@ -222,6 +251,7 @@ const approveUpgrade = asyncHandler(async (req, res) => {
             name: user.name,
             selectedPlan: user.selectedPlan,
             subscriptionStatus: user.subscriptionStatus,
+            subscriptionExpiry: user.subscriptionExpiry,
         },
     }, 'Upgrade approved');
 });

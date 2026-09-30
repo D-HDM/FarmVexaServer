@@ -34,10 +34,13 @@ async function markInvoicePaid(invoice, parsed) {
     await invoice.save();
 }
 
-async function markUserPaid(userId) {
+async function markUserPaid(userId, parsed, payment) {
     const user = await User.findById(userId);
     if (!user) return null;
     user.paymentStatus = 'paid';
+    user.paymentMethod = payment?.method || 'mpesa_stk';
+    user.paymentReference = parsed?.mpesaReceiptNumber || payment?.providerRef || null;
+    user.paymentDate = new Date();
     await user.save();
     return user;
 }
@@ -105,13 +108,15 @@ async function handleSuccess(payment, parsed) {
     }
 
     await markInvoicePaid(invoice, parsed);
-    const user = await markUserPaid(invoice.user);
+    const user = await markUserPaid(invoice.user, parsed, payment);
 
     mlog('INVOICE MARKED PAID', {
         invoiceNumber: invoice.invoiceNumber,
         amountPaid: invoice.amountPaid,
         receipt: parsed.mpesaReceiptNumber,
-        userId: invoice.user,
+        userId: String(invoice.user),
+        userPaymentReference: user?.paymentReference,
+        userPaymentMethod: user?.paymentMethod,
     });
 
     await notifyFarmer(user, invoice, parsed);

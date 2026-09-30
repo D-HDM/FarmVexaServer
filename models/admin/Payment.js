@@ -12,7 +12,7 @@ const paymentSchema = new mongoose.Schema({
 
     method: {
         type: String,
-        enum: ['mpesa_stk', 'mpesa_send_money', 'mpesa_till', 'mpesa_paybill', 'bank', 'cash', 'manual'],
+        enum: ['mpesa_stk', 'mpesa_send_money', 'mpesa_till', 'mpesa_paybill', 'bank', 'cash', 'manual', 'invoice'],
         default: 'mpesa_stk',
     },
 
@@ -26,7 +26,7 @@ const paymentSchema = new mongoose.Schema({
         index: true,
     },
 
-    providerRef: { type: String, index: true },      // M-Pesa checkoutRequestId → becomes receipt on success
+    providerRef: { type: String, index: true },
     checkoutRequestId: String,
     mpesaReceipt: String,
     phone: String,

@@ -41,6 +41,25 @@ async function withFreshInstructions(invoice) {
     }
 }
 
+function shapeInvoice(invoice) {
+    if (!invoice) return null;
+    return {
+        invoiceNumber: invoice.invoiceNumber,
+        amountDue: invoice.amountDue,
+        amountPaid: invoice.amountPaid,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
+        paidAt: invoice.paidAt,
+        status: invoice.status,
+        paymentMethod: invoice.paymentMethod,
+        paymentRef: invoice.paymentRef,
+        paymentInstructions: invoice.paymentInstructions,
+        invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
+    };
+}
+
+/* ============ REGISTER ============ */
 const register = asyncHandler(async (req, res) => {
     const { name, email, phone, password, county, subCounty, plan } = req.body;
 
@@ -168,22 +187,14 @@ const register = asyncHandler(async (req, res) => {
             paymentStatus: user.paymentStatus,
         },
         plan: { name: plan, price: planInfo.price, interval: planInfo.interval },
-        invoice: invoice ? {
-            id: invoice._id,
-            invoiceNumber: invoice.invoiceNumber,
-            amountDue: invoice.amountDue,
-            currency: invoice.currency,
-            dueDate: invoice.dueDate,
-            status: invoice.status,
-            paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl,
-        } : null,
+        invoice: shapeInvoice(invoice),
         scope: 'pending',
         token,
         refreshToken,
     }, 'Registration submitted. Awaiting payment.', 201);
 });
 
+/* ============ LOGIN ============ */
 const login = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return errorResponse(res, 'Email and password required', 400);
@@ -203,11 +214,10 @@ const login = asyncHandler(async (req, res) => {
     if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) scope = 'expired';
 
     let invoice = null;
-    if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
-        const raw = await Invoice.findOne({
-            user: user._id,
-            status: { $in: ['sent', 'draft'] },
-        }).sort({ createdAt: -1 }).lean();
+    if (scope === 'pending' || scope === 'expired' || user.paymentStatus !== 'paid') {
+        const raw = await Invoice.findOne({ user: user._id })
+            .sort({ createdAt: -1 })
+            .lean();
         invoice = await withFreshInstructions(raw);
     }
 
@@ -229,24 +239,20 @@ const login = asyncHandler(async (req, res) => {
             approvalStatus: user.approvalStatus,
             selectedPlan: user.selectedPlan,
             paymentStatus: user.paymentStatus,
+            paymentMethod: user.paymentMethod,
+            paymentReference: user.paymentReference,
+            paymentDate: user.paymentDate,
             subscriptionStatus: user.subscriptionStatus,
             subscriptionExpiry: user.subscriptionExpiry,
         },
-        invoice: invoice ? {
-            invoiceNumber: invoice.invoiceNumber,
-            amountDue: invoice.amountDue,
-            currency: invoice.currency,
-            dueDate: invoice.dueDate,
-            status: invoice.status,
-            paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
-        } : null,
+        invoice: shapeInvoice(invoice),
         scope,
         token,
         refreshToken,
     }, 'Login successful');
 });
 
+/* ============ ME ============ */
 const getMe = asyncHandler(async (req, res) => {
     const user = req.user;
     const scope = req.scope;
@@ -268,22 +274,18 @@ const getMe = asyncHandler(async (req, res) => {
             approvalStatus: user.approvalStatus,
             selectedPlan: user.selectedPlan,
             paymentStatus: user.paymentStatus,
+            paymentMethod: user.paymentMethod,
+            paymentReference: user.paymentReference,
+            paymentDate: user.paymentDate,
             subscriptionStatus: user.subscriptionStatus,
             subscriptionExpiry: user.subscriptionExpiry,
         },
-        invoice: invoice ? {
-            invoiceNumber: invoice.invoiceNumber,
-            amountDue: invoice.amountDue,
-            currency: invoice.currency,
-            dueDate: invoice.dueDate,
-            status: invoice.status,
-            paymentInstructions: invoice.paymentInstructions,
-            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
-        } : null,
+        invoice: shapeInvoice(invoice),
         scope,
     });
 });
 
+/* ============ PROFILE ============ */
 const getProfile = asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return errorResponse(res, 'User not found', 404);
@@ -325,6 +327,7 @@ const changePassword = asyncHandler(async (req, res) => {
     return successResponse(res, null, 'Password changed');
 });
 
+/* ============ FORGOT / RESET ============ */
 const forgotPassword = asyncHandler(async (req, res) => {
     const { email } = req.body;
     if (!email) return errorResponse(res, 'Email required', 400);
@@ -367,6 +370,7 @@ const resetPassword = asyncHandler(async (req, res) => {
     return successResponse(res, null, 'Password reset successful');
 });
 
+/* ============ REFRESH ============ */
 const refreshTokenHandler = asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
     if (!refreshToken) return errorResponse(res, 'Refresh token required', 400);
