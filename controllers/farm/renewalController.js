@@ -1,20 +1,19 @@
 const User = require('../../models/farm/User');
 const Invoice = require('../../models/admin/Invoice');
-const Payment = require('../../models/admin/Payment');
 const PendingApproval = require('../../models/admin/PendingApproval');
 const Settings = require('../../models/admin/Settings');
 const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const planService = require('../../services/planService');
+const { durationDaysFromInterval } = require('../../utils/planDuration');
 const Admin = require('../../models/admin/Admin');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
 const getSubscriptionDetails = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.id).select('-password').lean();
-    if (!user) return errorResponse(res, 'User not found', 404);
+    const user = req.user;
 
     const pendingInvoice = await Invoice.findOne({
         user: user._id,
@@ -107,6 +106,7 @@ const submitRenewal = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
             previousExpiry: user.subscriptionExpiry,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         });
         if (user.phone) {
             await smsService.send(user.phone, 'farmerRenewalReceived', {
@@ -144,6 +144,7 @@ const submitRenewal = asyncHandler(async (req, res) => {
             dueDate: invoice.dueDate,
             status: invoice.status,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         },
     }, 'Renewal invoice created. Please complete payment.', 201);
 });
@@ -177,7 +178,11 @@ const approveRenewal = asyncHandler(async (req, res) => {
     const user = await User.findById(approval.user);
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    await user.renewSubscription(30);
+    const planInfo = await planService.getByName(user.selectedPlan);
+    if (!planInfo) return errorResponse(res, 'Plan no longer available', 400);
+
+    const durationDays = durationDaysFromInterval(planInfo.interval) || 30;
+    await user.renewSubscription(durationDays);
     user.isActive = true;
     await user.save();
 
@@ -186,20 +191,6 @@ const approveRenewal = asyncHandler(async (req, res) => {
     approval.reviewedAt = new Date();
     approval.notes = req.body.notes || '';
     await approval.save();
-
-    const invoice = await Invoice.findOne({
-        user: user._id,
-        type: 'renewal',
-        status: { $in: ['sent', 'paid'] },
-    }).sort({ createdAt: -1 });
-
-    if (invoice && invoice.status !== 'paid') {
-        invoice.status = 'paid';
-        invoice.amountPaid = invoice.amountDue;
-        invoice.amountDue = 0;
-        invoice.paidAt = new Date();
-        await invoice.save();
-    }
 
     try {
         await emailService.send(user.email, 'farmerRenewalApproved', {

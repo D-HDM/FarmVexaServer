@@ -5,6 +5,7 @@ const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const planService = require('../../services/planService');
+const { expiryFromInterval } = require('../../utils/planDuration');
 const Admin = require('../../models/admin/Admin');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -30,6 +31,7 @@ const getPlans = asyncHandler(async (req, res) => {
             oldPlan: pendingUpgrade.oldPlan,
             newPlan: pendingUpgrade.newPlan,
             amount: pendingUpgrade.amount,
+            paymentReference: pendingUpgrade.paymentReference,
             submittedAt: pendingUpgrade.createdAt,
         } : null,
         plans,
@@ -101,6 +103,7 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             invoiceNumber: invoice.invoiceNumber,
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         });
         if (user.phone) {
             await smsService.send(user.phone, 'farmerUpgradeReceived', {
@@ -139,6 +142,7 @@ const submitUpgrade = asyncHandler(async (req, res) => {
             currency: invoice.currency,
             dueDate: invoice.dueDate,
             paymentInstructions: invoice.paymentInstructions,
+            invoiceUrl: `${process.env.CLIENT_URL}/invoice/${invoice.invoiceNumber}`,
         },
     }, 'Upgrade invoice created. Please complete payment.', 201);
 });
@@ -181,33 +185,21 @@ const approveUpgrade = asyncHandler(async (req, res) => {
     user.subscriptionStatus = 'active';
     user.isActive = true;
 
-    if (newPlanDoc.interval === 'monthly') {
-        user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    } else {
-        user.subscriptionExpiry = null;
+    const now = new Date();
+    const currentExpiry = user.subscriptionExpiry ? new Date(user.subscriptionExpiry) : null;
+    const isFutureExpiry = currentExpiry && currentExpiry > now;
+
+    if (!isFutureExpiry) {
+        user.subscriptionExpiry = expiryFromInterval(newPlanDoc.interval, now);
     }
 
     await user.save();
 
     approval.status = 'approved';
     approval.reviewedBy = req.user.id;
-    approval.reviewedAt = new Date();
+    approval.reviewedAt = now;
     approval.notes = req.body.notes || '';
     await approval.save();
-
-    const invoice = await Invoice.findOne({
-        user: user._id,
-        type: 'upgrade',
-        status: { $in: ['sent', 'paid'] },
-    }).sort({ createdAt: -1 });
-
-    if (invoice && invoice.status !== 'paid') {
-        invoice.status = 'paid';
-        invoice.amountPaid = invoice.amountDue;
-        invoice.amountDue = 0;
-        invoice.paidAt = new Date();
-        await invoice.save();
-    }
 
     try {
         await emailService.send(user.email, 'farmerUpgradeApproved', {

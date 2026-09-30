@@ -11,6 +11,7 @@ const {
     refreshTokenHandler,
 } = require('../../controllers/farm/authController');
 const farmerAuth = require('../../middleware/farm/auth');
+const scopedAuth = require('../../middleware/farm/scopedAuth');
 const { authLimiter } = require('../../middleware/global/rateLimiter');
 
 router.post('/register', authLimiter, register);
@@ -19,9 +20,7 @@ router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 router.post('/refresh-token', refreshTokenHandler);
 
-// Renewal-safe auth: token required but no subscription/isActive check
-const renewalAuth = require('../../middleware/farm/renewalAuth');
-router.get('/me', renewalAuth, getMe);
+router.get('/me', scopedAuth, getMe);
 
 router.use(farmerAuth);
 

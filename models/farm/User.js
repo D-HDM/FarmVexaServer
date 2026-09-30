@@ -69,7 +69,7 @@ const userSchema = new mongoose.Schema({
     },
     planInterval: {
         type: String,
-        enum: ['one_time', 'monthly', 'daily', 'weekly', 'quarterly', 'yearly'],
+        enum: ['one_time', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly'],
         default: 'one_time',
     },
     planPrice: {
@@ -99,7 +99,7 @@ const userSchema = new mongoose.Schema({
     subscriptionStatus: {
         type: String,
         enum: ['active', 'expired', 'pending_renewal', 'cancelled'],
-        default: 'active',
+        default: 'expired',
     },
     lastRenewalDate: Date,
     renewalCount: {

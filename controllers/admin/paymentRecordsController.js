@@ -1,36 +1,39 @@
-const PaymentRecord = require('../../models/admin/PaymentRecord');
+const Payment = require('../../models/admin/Payment');
+const Invoice = require('../../models/admin/Invoice');
 const User = require('../../models/farm/User');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
+/* ============ LIST PAYMENTS ============ */
 const getAllPayments = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 20, status, methodType, plan, type } = req.query;
+    const { page = 1, limit = 20, status, method, purpose, type } = req.query;
     const query = {};
 
     if (status) query.status = status;
-    if (methodType) query.methodType = methodType;
-    if (plan) query.plan = plan;
-    if (type) query.type = type;
+    if (method) query.method = method;
+    if (purpose) query.purpose = purpose;
+    if (type) query.purpose = type;
 
-    const payments = await PaymentRecord.find(query)
+    const payments = await Payment.find(query)
         .populate('user', 'name email phone selectedPlan subscriptionExpiry')
+        .populate('invoice', 'invoiceNumber amountPaid amountDue currency')
         .populate('verifiedBy', 'name email')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(parseInt(limit))
         .lean();
 
-    const total = await PaymentRecord.countDocuments(query);
+    const total = await Payment.countDocuments(query);
 
-    const totalAmount = await PaymentRecord.aggregate([
-        { $match: { status: { $in: ['completed', 'pending_verification'] } } },
+    const totalAmount = await Payment.aggregate([
+        { $match: { status: { $in: ['success', 'pending'] } } },
         { $group: { _id: null, sum: { $sum: '$amount' } } },
     ]);
 
-    const pendingCount = await PaymentRecord.countDocuments({ status: 'pending_verification' });
-    const completedCount = await PaymentRecord.countDocuments({ status: 'completed' });
-    const failedCount = await PaymentRecord.countDocuments({ status: 'failed' });
+    const pendingCount = await Payment.countDocuments({ status: 'pending' });
+    const completedCount = await Payment.countDocuments({ status: 'success' });
+    const failedCount = await Payment.countDocuments({ status: 'failed' });
 
     return successResponse(res, {
         payments,
@@ -50,9 +53,11 @@ const getAllPayments = asyncHandler(async (req, res) => {
     });
 });
 
+/* ============ GET PAYMENT ============ */
 const getPaymentById = asyncHandler(async (req, res) => {
-    const payment = await PaymentRecord.findById(req.params.id)
-        .populate('user', 'name email phone county subCounty selectedPlan planInterval planPrice subscriptionExpiry subscriptionStatus')
+    const payment = await Payment.findById(req.params.id)
+        .populate('user', 'name email phone county subCounty selectedPlan planInterval planPrice subscriptionExpiry subscriptionStatus paymentStatus')
+        .populate('invoice', 'invoiceNumber amountPaid amountDue currency status paidAt')
         .populate('verifiedBy', 'name email')
         .lean();
 
@@ -60,35 +65,42 @@ const getPaymentById = asyncHandler(async (req, res) => {
     return successResponse(res, { payment });
 });
 
+/* ============ VERIFY PAYMENT (manual success) ============ */
 const verifyPayment = asyncHandler(async (req, res) => {
-    const payment = await PaymentRecord.findById(req.params.id);
+    const payment = await Payment.findById(req.params.id);
     if (!payment) return errorResponse(res, 'Payment not found', 404);
 
-    payment.status = 'completed';
+    if (payment.status === 'success') {
+        return errorResponse(res, 'Payment already verified', 400);
+    }
+
+    const now = new Date();
+
+    payment.status = 'success';
     payment.verifiedBy = req.user.id;
-    payment.verifiedAt = new Date();
+    payment.verifiedAt = now;
     await payment.save();
 
-    // Update user
+    if (payment.invoice) {
+        const invoice = await Invoice.findById(payment.invoice);
+        if (invoice && invoice.status !== 'paid') {
+            invoice.status = 'paid';
+            invoice.amountPaid = invoice.total;
+            invoice.amountDue = 0;
+            invoice.paidAt = now;
+            invoice.paymentMethod = payment.method;
+            invoice.paymentRef = payment.providerRef || payment.mpesaReceipt || null;
+            await invoice.save();
+        }
+    }
+
     if (payment.user) {
         const user = await User.findById(payment.user);
         if (user) {
             user.paymentStatus = 'paid';
-
-            // If registration and monthly plan → activate subscription
-            if (payment.type === 'registration' && user.planInterval === 'monthly') {
-                user.subscriptionStartDate = new Date();
-                user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-                user.subscriptionStatus = 'active';
-                user.isActive = true;
-                user.approvalStatus = 'approved';
-            }
-
-            // If renewal → extend subscription
-            if (payment.type === 'renewal') {
-                await user.renewSubscription(30);
-            }
-
+            user.paymentMethod = payment.method;
+            user.paymentReference = payment.providerRef || payment.mpesaReceipt || null;
+            user.paymentDate = now;
             await user.save();
         }
     }
@@ -97,51 +109,55 @@ const verifyPayment = asyncHandler(async (req, res) => {
     return successResponse(res, { payment }, 'Payment verified');
 });
 
+/* ============ REJECT PAYMENT ============ */
 const rejectPayment = asyncHandler(async (req, res) => {
-    const payment = await PaymentRecord.findById(req.params.id);
+    const payment = await Payment.findById(req.params.id);
     if (!payment) return errorResponse(res, 'Payment not found', 404);
+
+    const now = new Date();
 
     payment.status = 'failed';
     payment.verifiedBy = req.user.id;
-    payment.verifiedAt = new Date();
+    payment.verifiedAt = now;
     await payment.save();
 
-    // Update user
     if (payment.user) {
         const user = await User.findById(payment.user);
         if (user) {
             user.paymentStatus = 'failed';
-            if (payment.type === 'renewal') {
+            if (payment.purpose === 'renewal') {
                 user.subscriptionStatus = user.isSubscriptionExpired() ? 'expired' : 'active';
             }
             await user.save();
         }
     }
 
+    logger.info(`Payment ${payment._id} rejected by admin ${req.user.id}`);
     return successResponse(res, { payment }, 'Payment rejected');
 });
 
+/* ============ STATS ============ */
 const getPaymentStats = asyncHandler(async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const todayCount = await PaymentRecord.countDocuments({ createdAt: { $gte: today } });
-    const todayAmount = await PaymentRecord.aggregate([
-        { $match: { createdAt: { $gte: today }, status: { $in: ['completed', 'pending_verification'] } } },
+    const todayCount = await Payment.countDocuments({ createdAt: { $gte: today } });
+    const todayAmount = await Payment.aggregate([
+        { $match: { createdAt: { $gte: today }, status: { $in: ['success', 'pending'] } } },
         { $group: { _id: null, sum: { $sum: '$amount' } } },
     ]);
 
-    const byPlan = await PaymentRecord.aggregate([
-        { $match: { status: { $in: ['completed', 'pending_verification'] } } },
-        { $group: { _id: '$plan', count: { $sum: 1 }, total: { $sum: '$amount' } } },
+    const byPurpose = await Payment.aggregate([
+        { $match: { status: { $in: ['success', 'pending'] } } },
+        { $group: { _id: '$purpose', count: { $sum: 1 }, total: { $sum: '$amount' } } },
     ]);
 
-    const byMethod = await PaymentRecord.aggregate([
-        { $group: { _id: '$methodType', count: { $sum: 1 } } },
+    const byMethod = await Payment.aggregate([
+        { $group: { _id: '$method', count: { $sum: 1 } } },
     ]);
 
-    const byType = await PaymentRecord.aggregate([
-        { $group: { _id: '$type', count: { $sum: 1 }, total: { $sum: '$amount' } } },
+    const byStatus = await Payment.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
 
     return successResponse(res, {
@@ -149,9 +165,9 @@ const getPaymentStats = asyncHandler(async (req, res) => {
             count: todayCount,
             amount: todayAmount[0]?.sum || 0,
         },
-        byPlan,
+        byPurpose,
         byMethod,
-        byType,
+        byStatus,
     });
 });
 

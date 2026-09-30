@@ -1,12 +1,14 @@
 const Invoice = require('../models/admin/Invoice');
 const Settings = require('../models/admin/Settings');
 const paymentInstructionsService = require('./paymentInstructionsService');
+const planService = require('./planService');
 const logger = require('../utils/logger');
 const { generateInvoiceNumber } = require('../utils/invoiceNumber');
 
 function intervalLabel(interval) {
     if (interval === 'once' || interval === 'one_time') return 'One-time';
     if (interval === 'year') return 'Annual';
+    if (interval === 'yearly') return 'Annual';
     return 'Monthly';
 }
 
@@ -32,6 +34,7 @@ async function generateInvoice({
     plan,
     planPrice,
     planInterval,
+    planDoc = null,
     type = 'registration',
 }) {
     if (!userId || !user) {
@@ -42,8 +45,20 @@ async function generateInvoice({
     const dueHours = settings?.invoice?.dueHours || 3;
 
     const planName = plan || 'Basic';
-    const price = Number(planPrice || 0);
-    const interval = planInterval || 'one_time';
+    let price = Number(planPrice || 0);
+    let interval = planInterval || 'one_time';
+
+    if (planDoc) {
+        price = Number(planDoc.price ?? price);
+        interval = planDoc.interval || interval;
+    } else if (!planPrice || !planInterval) {
+        const fetched = await planService.getByName(planName);
+        if (fetched) {
+            price = Number(fetched.price ?? price);
+            interval = fetched.interval || interval;
+        }
+    }
+
     const label = intervalLabel(interval);
 
     const issuedAt = new Date();
@@ -52,7 +67,7 @@ async function generateInvoice({
     const items = [
         {
             name: `FarmVexa ${planName} Plan`,
-            description: `${label}${farmId ? '' : ''}`,
+            description: label,
             qty: 1,
             unitPrice: price,
             subtotal: price,

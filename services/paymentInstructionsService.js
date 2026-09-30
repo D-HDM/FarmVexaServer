@@ -34,11 +34,11 @@ function substitute(template, vars) {
 }
 
 function buildVars({ amount, currency, invoiceNumber }) {
-    const amountStr = Number(amount).toLocaleString('en-KE');
+    const amountStr = Number(amount || 0).toLocaleString('en-KE');
     return {
         sale_number: invoiceNumber,
         invoice_number: invoiceNumber,
-        invoiceNumber: invoiceNumber,
+        invoiceNumber,
         invoice: invoiceNumber,
         amount: amountStr,
         amountRaw: amount,
@@ -73,6 +73,7 @@ function buildInstructions(method, { amount, currency, invoiceNumber }) {
                     `Pay ${currency} ${amountStr}`,
                     'Request a receipt for your records',
                 ],
+                recipient: {},
             };
 
         case 'mpesa_send':
@@ -196,4 +197,34 @@ async function getPublicPaymentMethods() {
     }));
 }
 
-module.exports = { getPaymentInstructions, getPublicPaymentMethods };
+async function getPublicPaymentMethodsWithInstructions({ amount = 0, currency = 'KES', invoiceNumber = '-' } = {}) {
+    const methods = await PaymentMethod.find({ enabled: true }).sort({ order: 1 }).lean();
+
+    const list = [];
+    for (const m of methods) {
+        const clean = { ...m, config: sanitizeConfig(m.code, m.config) };
+        const built = buildInstructions(clean, { amount, currency, invoiceNumber });
+        if (built) {
+            list.push({
+                id: m._id,
+                code: m.code,
+                label: m.label,
+                mode: m.mode,
+                config: clean.config,
+                title: built.title,
+                description: built.description,
+                steps: built.steps,
+                recipient: built.recipient,
+                action: built.action,
+            });
+        }
+    }
+
+    return list;
+}
+
+module.exports = {
+    getPaymentInstructions,
+    getPublicPaymentMethods,
+    getPublicPaymentMethodsWithInstructions,
+};

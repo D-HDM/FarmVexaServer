@@ -1,10 +1,11 @@
 const User = require('../../models/farm/User');
 const PendingApproval = require('../../models/admin/PendingApproval');
-const PaymentRecord = require('../../models/admin/PaymentRecord');
 const Invoice = require('../../models/admin/Invoice');
 const Payment = require('../../models/admin/Payment');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
+const planService = require('../../services/planService');
+const { expiryFromInterval } = require('../../utils/planDuration');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
@@ -25,7 +26,7 @@ const getPendingApprovals = asyncHandler(async (req, res) => {
             const invoice = await Invoice.findOne({ user: approval.user?._id })
                 .sort({ createdAt: -1 })
                 .lean();
-            const payment = await PaymentRecord.findOne({ user: approval.user?._id })
+            const payment = await Payment.findOne({ user: approval.user?._id })
                 .sort({ createdAt: -1 })
                 .lean();
             return { ...approval, invoice, payment };
@@ -53,67 +54,33 @@ const approveUser = asyncHandler(async (req, res) => {
         return errorResponse(res, `User is already ${user.approvalStatus}`, 400);
     }
 
+    const planInfo = await planService.getByName(user.selectedPlan);
+    if (!planInfo) return errorResponse(res, 'Plan no longer available', 400);
+
+    const now = new Date();
+    const expiry = expiryFromInterval(planInfo.interval, now);
+
     user.approvalStatus = 'approved';
     user.isActive = true;
     user.approvedBy = req.user.id;
-    user.approvedAt = new Date();
-    user.paymentStatus = 'paid';
+    user.approvedAt = now;
     user.rejectionReason = undefined;
 
-    if (user.planInterval === 'monthly') {
-        user.subscriptionStartDate = new Date();
-        user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        user.subscriptionStatus = 'active';
-    } else {
-        user.subscriptionStartDate = new Date();
-        user.subscriptionExpiry = null;
-        user.subscriptionStatus = 'active';
-    }
+    user.subscriptionStartDate = now;
+    user.subscriptionExpiry = expiry;
+    user.subscriptionStatus = 'active';
 
     await user.save();
 
-    // Mark all invoices paid
-    try {
-        const invoices = await Invoice.find({ user: user._id, status: { $in: ['sent', 'draft'] } });
-        for (const inv of invoices) {
-            inv.status = 'paid';
-            inv.amountPaid = inv.total;
-            inv.amountDue = 0;
-            inv.paidAt = new Date();
-            inv.paymentMethod = inv.paymentMethod || 'manual';
-            await inv.save();
-        }
-    } catch (err) {
-        logger.error(`Invoice update on approval failed: ${err.message}`);
-    }
-
-    // Update Payment records
-    try {
-        await Payment.updateMany(
-            { user: user._id, status: 'pending' },
-            {
-                $set: {
-                    status: 'success',
-                    verifiedBy: req.user.id,
-                    verifiedAt: new Date(),
-                },
-            }
-        );
-    } catch (err) {
-        logger.error(`Payment update on approval failed: ${err.message}`);
-    }
-
-    // PendingApproval update
-    let approval = await PendingApproval.findOne({ user: user._id });
-    if (!approval) approval = new PendingApproval({ user: user._id });
+    let approval = await PendingApproval.findOne({ user: user._id, type: 'registration' });
+    if (!approval) approval = new PendingApproval({ user: user._id, type: 'registration' });
     approval.status = 'approved';
     approval.reviewedBy = req.user.id;
-    approval.reviewedAt = new Date();
+    approval.reviewedAt = now;
     approval.rejectionReason = undefined;
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    // Notify farmer
     try {
         await emailService.send(user.email, 'farmerApproved', {
             user,
@@ -163,35 +130,8 @@ const rejectUser = asyncHandler(async (req, res) => {
     user.subscriptionStatus = 'cancelled';
     await user.save();
 
-    // Cancel invoices
-    try {
-        await Invoice.updateMany(
-            { user: user._id, status: { $in: ['sent', 'draft'] } },
-            { $set: { status: 'cancelled' } }
-        );
-    } catch (err) {
-        logger.error(`Invoice cancel on rejection failed: ${err.message}`);
-    }
-
-    // Fail pending payments
-    try {
-        await Payment.updateMany(
-            { user: user._id, status: 'pending' },
-            {
-                $set: {
-                    status: 'failed',
-                    verifiedBy: req.user.id,
-                    verifiedAt: new Date(),
-                },
-            }
-        );
-    } catch (err) {
-        logger.error(`Payment fail on rejection failed: ${err.message}`);
-    }
-
-    // PendingApproval update
-    let approval = await PendingApproval.findOne({ user: user._id });
-    if (!approval) approval = new PendingApproval({ user: user._id });
+    let approval = await PendingApproval.findOne({ user: user._id, type: 'registration' });
+    if (!approval) approval = new PendingApproval({ user: user._id, type: 'registration' });
     approval.status = 'rejected';
     approval.reviewedBy = req.user.id;
     approval.reviewedAt = new Date();
@@ -199,7 +139,6 @@ const rejectUser = asyncHandler(async (req, res) => {
     approval.notes = req.body.notes || '';
     await approval.save();
 
-    // Notify farmer
     try {
         await emailService.send(user.email, 'farmerRejected', { user, reason });
         if (user.phone) {
@@ -219,14 +158,14 @@ const rejectUser = asyncHandler(async (req, res) => {
     }, 'User rejected');
 });
 
-/* ============ CONFIRM PAYMENT (without approving) ============ */
+/* ============ CONFIRM PAYMENT (manual) ============ */
 const confirmPayment = asyncHandler(async (req, res) => {
     const { method, reference, note } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) return errorResponse(res, 'User not found', 404);
 
-    // Mark all sent/draft invoices as paid
     const invoices = await Invoice.find({ user: user._id, status: { $in: ['sent', 'draft'] } });
+
     for (const inv of invoices) {
         inv.status = 'paid';
         inv.amountPaid = inv.total;
@@ -237,7 +176,6 @@ const confirmPayment = asyncHandler(async (req, res) => {
         await inv.save();
     }
 
-    // Mark pending payments successful
     await Payment.updateMany(
         { user: user._id, status: 'pending' },
         {
@@ -250,18 +188,22 @@ const confirmPayment = asyncHandler(async (req, res) => {
     );
 
     user.paymentStatus = 'paid';
+    user.paymentMethod = method || 'manual';
+    user.paymentReference = reference || null;
+    user.paymentDate = new Date();
     await user.save();
 
-    // Notify farmer
     if (invoices.length > 0) {
         try {
             await emailService.send(user.email, 'farmerPaymentReceived', {
                 user,
+                name: user.name,
                 invoiceNumber: invoices[0].invoiceNumber,
                 amount: invoices[0].total,
+                currency: invoices[0].currency,
+                paidAt: new Date(),
                 paymentMethod: method || 'manual',
                 paymentReference: reference || 'N/A',
-                paidAt: new Date(),
             });
             if (user.phone) {
                 await smsService.send(user.phone, 'farmerPaymentReceived', {
@@ -301,7 +243,7 @@ const getApprovalHistory = asyncHandler(async (req, res) => {
             const invoice = await Invoice.findOne({ user: approval.user?._id })
                 .sort({ createdAt: -1 })
                 .lean();
-            const payment = await PaymentRecord.findOne({ user: approval.user?._id })
+            const payment = await Payment.findOne({ user: approval.user?._id })
                 .sort({ createdAt: -1 })
                 .lean();
             return { ...approval, invoice, payment };

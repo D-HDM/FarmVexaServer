@@ -1,11 +1,10 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../../models/farm/User');
-const Farm = require('../../models/farm/Farm');
-const TeamMember = require('../../models/farm/TeamMember');
 const Invoice = require('../../models/admin/Invoice');
 const Settings = require('../../models/admin/Settings');
 const Admin = require('../../models/admin/Admin');
+const PendingApproval = require('../../models/admin/PendingApproval');
 const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
@@ -59,6 +58,17 @@ const register = asyncHandler(async (req, res) => {
         planInterval: planInfo.interval,
         planPrice: planInfo.price,
         paymentStatus: 'unpaid',
+        subscriptionStatus: 'expired',
+        subscriptionExpiry: null,
+        subscriptionStartDate: null,
+    });
+
+    await PendingApproval.create({
+        user: user._id,
+        type: 'registration',
+        status: 'pending',
+        plan,
+        amount: planInfo.price,
     });
 
     let invoice = null;
@@ -172,22 +182,16 @@ const login = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Account was rejected. Contact support.', 403);
     }
 
+    let scope = 'active';
+    if (user.approvalStatus === 'pending') scope = 'pending';
+    if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) scope = 'expired';
+
     let invoice = null;
     if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
         invoice = await Invoice.findOne({
             user: user._id,
             status: { $in: ['sent', 'draft'] },
         }).sort({ createdAt: -1 }).lean();
-    }
-
-    let scope = 'active';
-    if (user.approvalStatus === 'pending') scope = 'pending';
-
-    if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) {
-        user.subscriptionStatus = 'expired';
-        user.isActive = false;
-        await user.save();
-        scope = 'expired';
     }
 
     user.lastLogin = new Date();
@@ -227,20 +231,9 @@ const login = asyncHandler(async (req, res) => {
 });
 
 const getMe = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.id).select('-password').lean();
-    if (!user) return errorResponse(res, 'User not found', 404);
-
-    let invoice = null;
-    if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
-        invoice = await Invoice.findOne({
-            user: user._id,
-            status: { $in: ['sent', 'draft'] },
-        }).sort({ createdAt: -1 }).lean();
-    }
-
-    let scope = 'active';
-    if (user.approvalStatus === 'pending') scope = 'pending';
-    if (user.subscriptionExpiry && new Date() > new Date(user.subscriptionExpiry)) scope = 'expired';
+    const user = req.user;
+    const scope = req.scope;
+    const invoice = req.invoice;
 
     return successResponse(res, {
         user: {
@@ -249,6 +242,8 @@ const getMe = asyncHandler(async (req, res) => {
             email: user.email,
             phone: user.phone,
             role: user.role,
+            county: user.county,
+            subCounty: user.subCounty,
             approvalStatus: user.approvalStatus,
             selectedPlan: user.selectedPlan,
             paymentStatus: user.paymentStatus,

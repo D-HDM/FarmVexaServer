@@ -1,15 +1,19 @@
 const Settings = require('../../models/admin/Settings');
-const PaymentMethod = require('../../models/admin/PaymentMethod');
 const PaymentModel = require('../../models/admin/PaymentModel');
 const Admin = require('../../models/admin/Admin');
 const Document = require('../../models/admin/Document');
+const paymentInstructionsService = require('../../services/paymentInstructionsService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
 const getPublicSettings = asyncHandler(async (req, res) => {
     const settings = await Settings.findOne();
-    const paymentMethods = await PaymentMethod.find({ enabled: true }).select('-details.consumerKey -details.consumerSecret -details.passkey');
-    const paymentModels = await PaymentModel.find({ enabled: true }).sort({ price: 1 });
+    const paymentModels = await PaymentModel.find({ enabled: true }).sort({ price: 1 }).lean();
+    const paymentMethods = await paymentInstructionsService.getPublicPaymentMethodsWithInstructions({
+        amount: 0,
+        currency: 'KES',
+        invoiceNumber: '-',
+    });
 
     return successResponse(res, {
         appName: settings?.system?.appName || 'FarmVexa',
@@ -52,20 +56,7 @@ const getPublicSettings = asyncHandler(async (req, res) => {
             aiProvider: settings?.system?.chatbot?.aiProvider || 'gemini',
         },
         legal: settings?.system?.legal || { termsOfService: '', privacyPolicy: '', cookiePolicy: '' },
-        paymentMethods: paymentMethods.map((m) => ({
-            id: m._id,
-            name: m.name,
-            type: m.type,
-            details: {
-                paybill: m.details?.paybill,
-                accountNumber: m.details?.accountNumber,
-                tillNumber: m.details?.tillNumber,
-                phoneNumber: m.details?.phoneNumber,
-                bankName: m.details?.bankName,
-                accountName: m.details?.accountName,
-                branch: m.details?.branch,
-            },
-        })),
+        paymentMethods,
         paymentModels: paymentModels.map((p) => ({
             id: p._id,
             name: p.name,
@@ -99,7 +90,7 @@ const createFirstAdmin = asyncHandler(async (req, res) => {
 
 const getChatbotSettings = asyncHandler(async (req, res) => {
     const settings = await Settings.findOne();
-    const paymentModels = await PaymentModel.find({ enabled: true }).sort({ price: 1 });
+    const paymentModels = await PaymentModel.find({ enabled: true }).sort({ price: 1 }).lean();
 
     const chatbot = settings?.system?.chatbot || {};
     if (!chatbot.enabled) {
@@ -163,4 +154,4 @@ const getPublicDocuments = asyncHandler(async (req, res) => {
     return successResponse(res, { documents });
 });
 
-module.exports = { getPublicSettings, checkAdminExists, createFirstAdmin, getChatbotSettings,getPublicDocuments };
+module.exports = { getPublicSettings, checkAdminExists, createFirstAdmin, getChatbotSettings, getPublicDocuments };

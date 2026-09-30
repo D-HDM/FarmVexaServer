@@ -7,6 +7,17 @@ const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
 const getPaymentMethods = asyncHandler(async (req, res) => {
+    const { amount, currency, invoiceNumber } = req.query;
+
+    if (amount || invoiceNumber) {
+        const methods = await paymentInstructionsService.getPaymentInstructions({
+            amount: Number(amount) || 0,
+            currency: currency || 'KES',
+            invoiceNumber: invoiceNumber || '-',
+        });
+        return successResponse(res, { methods });
+    }
+
     const methods = await paymentInstructionsService.getPublicPaymentMethods();
     return successResponse(res, { methods });
 });
@@ -21,18 +32,10 @@ const sendStkForInvoice = asyncHandler(async (req, res) => {
     const invoice = await Invoice.findOne({ invoiceNumber });
     if (!invoice) return errorResponse(res, 'Invoice not found', 404);
 
-    if (invoice.status === 'paid') {
-        return errorResponse(res, 'Invoice already paid', 400);
-    }
-    if (invoice.status === 'cancelled') {
-        return errorResponse(res, 'Invoice cancelled', 400);
-    }
-    if (invoice.status === 'expired') {
-        return errorResponse(res, 'Invoice expired', 400);
-    }
-    if (invoice.amountDue <= 0) {
-        return errorResponse(res, 'Nothing to pay', 400);
-    }
+    if (invoice.status === 'paid') return errorResponse(res, 'Invoice already paid', 400);
+    if (invoice.status === 'cancelled') return errorResponse(res, 'Invoice cancelled', 400);
+    if (invoice.status === 'expired') return errorResponse(res, 'Invoice expired', 400);
+    if (invoice.amountDue <= 0) return errorResponse(res, 'Nothing to pay', 400);
 
     const stk = await mpesaService.initiateSTKPush({
         phone,
@@ -45,7 +48,6 @@ const sendStkForInvoice = asyncHandler(async (req, res) => {
         return errorResponse(res, stk.error?.errorMessage || 'STK Push failed', 500);
     }
 
-    // Save STK request on invoice
     invoice.stkLastRequest = {
         checkoutRequestId: stk.checkoutRequestId,
         phone,
@@ -53,7 +55,6 @@ const sendStkForInvoice = asyncHandler(async (req, res) => {
     };
     await invoice.save();
 
-    // Create Payment record
     await Payment.create({
         user: invoice.user,
         invoice: invoice._id,
@@ -77,10 +78,7 @@ const checkStkStatus = asyncHandler(async (req, res) => {
     const { checkoutRequestId } = req.params;
     if (!checkoutRequestId) return errorResponse(res, 'checkoutRequestId required', 400);
 
-    const payment = await Payment.findOne({
-        checkoutRequestId,
-    }).lean();
-
+    const payment = await Payment.findOne({ checkoutRequestId }).lean();
     if (!payment) return errorResponse(res, 'Payment not found', 404);
 
     const invoice = payment.invoice
@@ -104,7 +102,7 @@ const getInvoiceByNumber = asyncHandler(async (req, res) => {
     const { invoiceNumber } = req.params;
 
     const invoice = await Invoice.findOne({ invoiceNumber })
-        .select('-__v')
+        .select('-__v -stkLastRequest')
         .lean();
 
     if (!invoice) return errorResponse(res, 'Invoice not found', 404);

@@ -3,9 +3,9 @@ const {
     getSubscriptionDetails,
     submitRenewal,
 } = require('../../controllers/farm/renewalController');
-const renewalAuth = require('../../middleware/farm/renewalAuth');
+const scopedAuth = require('../../middleware/farm/scopedAuth');
 
-router.use(renewalAuth);
+router.use(scopedAuth);
 
 router.get('/subscription', getSubscriptionDetails);
 router.post('/submit', submitRenewal);

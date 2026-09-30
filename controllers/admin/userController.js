@@ -22,7 +22,8 @@ const Weather = require('../../models/farm/Weather');
 const MarketProduct = require('../../models/farm/MarketProduct');
 const MarketInquiry = require('../../models/farm/MarketInquiry');
 const NotificationLog = require('../../models/farm/NotificationLog');
-const PaymentRecord = require('../../models/admin/PaymentRecord');
+const Payment = require('../../models/admin/Payment');
+const Invoice = require('../../models/admin/Invoice');
 const PendingApproval = require('../../models/admin/PendingApproval');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -47,8 +48,21 @@ const getAllUsers = asyncHandler(async (req, res) => {
     const usersWithDetails = await Promise.all(
         users.map(async (user) => {
             const farmCount = await Farm.countDocuments({ owner: user._id });
-            const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 }).lean();
-            return { ...user, farmCount, payment: payment ? { plan: payment.plan, amount: payment.amount, status: payment.status, methodType: payment.methodType, reference: payment.reference } : null };
+            const payment = await Payment.findOne({ user: user._id })
+                .sort({ createdAt: -1 })
+                .lean();
+            return {
+                ...user,
+                farmCount,
+                payment: payment ? {
+                    purpose: payment.purpose,
+                    amount: payment.amount,
+                    status: payment.status,
+                    method: payment.method,
+                    reference: payment.providerRef,
+                    mpesaReceipt: payment.mpesaReceipt,
+                } : null,
+            };
         })
     );
 
@@ -72,9 +86,19 @@ const getUserById = asyncHandler(async (req, res) => {
     }
 
     const farms = await Farm.find({ owner: user._id });
-    const payment = await PaymentRecord.findOne({ user: user._id }).sort({ createdAt: -1 }).lean();
+    const payment = await Payment.findOne({ user: user._id })
+        .sort({ createdAt: -1 })
+        .lean();
+    const invoice = await Invoice.findOne({ user: user._id })
+        .sort({ createdAt: -1 })
+        .lean();
 
-    return successResponse(res, { user, farms, payment });
+    return successResponse(res, {
+        user,
+        farms,
+        payment,
+        invoice,
+    });
 });
 
 const toggleUserStatus = asyncHandler(async (req, res) => {
@@ -94,13 +118,13 @@ const deleteUser = asyncHandler(async (req, res) => {
     if (!user) return errorResponse(res, 'User not found', 404);
 
     const farms = await Farm.find({ owner: user._id }).select('_id').lean();
-    const farmIds = farms.map(f => f._id);
+    const farmIds = farms.map((f) => f._id);
 
     const fields = await Field.find({ farm: { $in: farmIds } }).select('_id').lean();
-    const fieldIds = fields.map(f => f._id);
+    const fieldIds = fields.map((f) => f._id);
 
     const devices = await Device.find({ farm: { $in: farmIds } }).select('_id').lean();
-    const deviceIds = devices.map(d => d._id);
+    const deviceIds = devices.map((d) => d._id);
 
     if (farmIds.length > 0) {
         await Crop.deleteMany({ field: { $in: fieldIds } });
@@ -119,7 +143,9 @@ const deleteUser = asyncHandler(async (req, res) => {
         await Device.deleteMany({ farm: { $in: farmIds } });
         await Weather.deleteMany({ farm: { $in: farmIds } });
         await MarketProduct.deleteMany({ farm: { $in: farmIds } });
-        await MarketInquiry.deleteMany({ product: { $in: await MarketProduct.find({ farm: { $in: farmIds } }).distinct('_id') } });
+        await MarketInquiry.deleteMany({
+            product: { $in: await MarketProduct.find({ farm: { $in: farmIds } }).distinct('_id') },
+        });
         await Farm.deleteMany({ owner: user._id });
     }
 
@@ -131,7 +157,8 @@ const deleteUser = asyncHandler(async (req, res) => {
     await Chat.deleteMany({ user: user._id });
     await TeamMember.deleteMany({ user: user._id });
     await NotificationLog.deleteMany({ user: user._id });
-    await PaymentRecord.deleteMany({ user: user._id });
+    await Payment.deleteMany({ user: user._id });
+    await Invoice.deleteMany({ user: user._id });
     await PendingApproval.deleteMany({ user: user._id });
 
     await User.findByIdAndDelete(user._id);
