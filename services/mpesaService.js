@@ -1,13 +1,39 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const Settings = require('../models/admin/Settings');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
+
+const MPESA_LOG = path.join(__dirname, '..', 'logs', 'mpesa.log');
+const ensureLogDir = () => {
+    const dir = path.dirname(MPESA_LOG);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+};
+const mlog = (label, data) => {
+    try {
+        ensureLogDir();
+        const body = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        const line = `[${new Date().toISOString()}] ${label}\n${body}\n${'─'.repeat(60)}\n`;
+        fs.appendFileSync(MPESA_LOG, line, 'utf8');
+    } catch {}
+    console.log(`[MPESA] ${label}`, data ?? '');
+};
+const redact = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const clone = Array.isArray(obj) ? [...obj] : { ...obj };
+    for (const k of ['Password', 'passkey', 'consumerSecret']) {
+        if (k in clone) clone[k] = '***';
+    }
+    return clone;
+};
 
 let CONFIG = {
     baseUrl: env.mpesa.baseUrl,
     consumerKey: env.mpesa.consumerKey,
     consumerSecret: env.mpesa.consumerSecret,
     shortcode: env.mpesa.shortcode,
+    tillNumber: env.mpesa.tillNumber,
     passkey: env.mpesa.passkey,
     callbackUrl: env.mpesa.callbackUrl,
     transactionType: env.mpesa.transactionType,
@@ -23,14 +49,29 @@ async function loadFromSettings() {
                 consumerKey: m.consumerKey || CONFIG.consumerKey,
                 consumerSecret: m.consumerSecret || CONFIG.consumerSecret,
                 shortcode: m.shortcode || CONFIG.shortcode,
+                tillNumber: m.tillNumber || CONFIG.tillNumber,
                 passkey: m.passkey || CONFIG.passkey,
                 callbackUrl: m.callbackUrl || CONFIG.callbackUrl,
                 transactionType: m.transactionType || CONFIG.transactionType,
             };
-            logger.debug('M-Pesa config loaded from Settings');
+            mlog('CONFIG LOADED FROM SETTINGS', {
+                baseUrl: CONFIG.baseUrl,
+                shortcode: CONFIG.shortcode,
+                tillNumber: CONFIG.tillNumber,
+                transactionType: CONFIG.transactionType,
+                callbackUrl: CONFIG.callbackUrl,
+            });
+        } else {
+            mlog('CONFIG FROM ENV', {
+                baseUrl: CONFIG.baseUrl,
+                shortcode: CONFIG.shortcode,
+                tillNumber: CONFIG.tillNumber,
+                transactionType: CONFIG.transactionType,
+                callbackUrl: CONFIG.callbackUrl,
+            });
         }
     } catch (err) {
-        logger.warn(`M-Pesa settings load failed: ${err.message}`);
+        mlog('CONFIG LOAD ERROR', err.message);
     }
 }
 
@@ -52,6 +93,10 @@ async function getAccessToken() {
 
     const auth = Buffer.from(`${CONFIG.consumerKey}:${CONFIG.consumerSecret}`).toString('base64');
 
+    mlog('OAUTH REQUEST', {
+        url: `${CONFIG.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+    });
+
     try {
         const { data } = await axios.get(
             `${CONFIG.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
@@ -63,10 +108,15 @@ async function getAccessToken() {
             expiresAt: now + Number(data.expires_in) * 1000,
         };
 
+        mlog('OAUTH RESPONSE', {
+            expires_in: data.expires_in,
+            token_preview: data.access_token ? `${String(data.access_token).slice(0, 12)}...` : null,
+        });
+
         return data.access_token;
     } catch (error) {
         const err = error.response?.data || error.message;
-        logger.error(`M-Pesa OAuth error: ${JSON.stringify(err)}`);
+        mlog('OAUTH ERROR', err);
         throw new Error(`M-PESA OAuth failed: ${typeof err === 'string' ? err : JSON.stringify(err)}`);
     }
 }
@@ -101,6 +151,7 @@ async function initiateSTKPush({ phone, amount, accountReference = 'Invoice', de
     const timestamp = getTimestamp();
     const password = generatePassword(timestamp);
     const normalizedPhone = normalizePhone(phone);
+    const partyB = CONFIG.tillNumber || CONFIG.shortcode;
 
     const payload = {
         BusinessShortCode: CONFIG.shortcode,
@@ -109,12 +160,17 @@ async function initiateSTKPush({ phone, amount, accountReference = 'Invoice', de
         TransactionType: CONFIG.transactionType,
         Amount: Math.round(amount),
         PartyA: normalizedPhone,
-        PartyB: CONFIG.shortcode,
+        PartyB: partyB,
         PhoneNumber: normalizedPhone,
         CallBackURL: CONFIG.callbackUrl,
         AccountReference: accountReference,
         TransactionDesc: description,
     };
+
+    mlog('STK REQUEST', {
+        url: `${CONFIG.baseUrl}/mpesa/stkpush/v1/processrequest`,
+        payload: redact(payload),
+    });
 
     try {
         const { data } = await axios.post(
@@ -126,6 +182,8 @@ async function initiateSTKPush({ phone, amount, accountReference = 'Invoice', de
             }
         );
 
+        mlog('STK RESPONSE', data);
+
         return {
             success: true,
             merchantRequestId: data.MerchantRequestID,
@@ -136,7 +194,7 @@ async function initiateSTKPush({ phone, amount, accountReference = 'Invoice', de
         };
     } catch (error) {
         const err = error.response?.data || error.message;
-        logger.error(`STK Push error: ${JSON.stringify(err)}`);
+        mlog('STK ERROR', err);
         return { success: false, error: err };
     }
 }
@@ -154,6 +212,11 @@ async function querySTKStatus(checkoutRequestId) {
         CheckoutRequestID: checkoutRequestId,
     };
 
+    mlog('QUERY REQUEST', {
+        checkoutRequestId,
+        url: `${CONFIG.baseUrl}/mpesa/stkpushquery/v1/query`,
+    });
+
     try {
         const { data } = await axios.post(
             `${CONFIG.baseUrl}/mpesa/stkpushquery/v1/query`,
@@ -164,6 +227,8 @@ async function querySTKStatus(checkoutRequestId) {
             }
         );
 
+        mlog('QUERY RESPONSE', { checkoutRequestId, response: data });
+
         return {
             success: true,
             resultCode: data.ResultCode,
@@ -172,7 +237,7 @@ async function querySTKStatus(checkoutRequestId) {
         };
     } catch (error) {
         const err = error.response?.data || error.message;
-        logger.error(`STK Query error: ${JSON.stringify(err)}`);
+        mlog('QUERY ERROR', { checkoutRequestId, error: err });
         return { success: false, error: err };
     }
 }

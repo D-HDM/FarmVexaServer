@@ -149,6 +149,7 @@ const mpesaSettingsSchema = new mongoose.Schema({
     consumerKey: { type: String, default: '' },
     consumerSecret: { type: String, default: '' },
     shortcode: { type: String, default: '' },
+    tillNumber: { type: String, default: '' },
     passkey: { type: String, default: '' },
     callbackUrl: { type: String, default: '' },
     transactionType: { type: String, default: 'CustomerBuyGoodsOnline' },

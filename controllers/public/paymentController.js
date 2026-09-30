@@ -6,6 +6,19 @@ const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
+async function buildFreshInstructions(invoice) {
+    try {
+        return await paymentInstructionsService.getPaymentInstructions({
+            amount: invoice.amountDue ?? invoice.total,
+            currency: invoice.currency || 'KES',
+            invoiceNumber: invoice.invoiceNumber,
+        });
+    } catch (err) {
+        logger.error(`Fresh instructions failed for ${invoice.invoiceNumber}: ${err.message}`);
+        return invoice.paymentInstructions || [];
+    }
+}
+
 const getPaymentMethods = asyncHandler(async (req, res) => {
     const { amount, currency, invoiceNumber } = req.query;
 
@@ -107,7 +120,11 @@ const getInvoiceByNumber = asyncHandler(async (req, res) => {
 
     if (!invoice) return errorResponse(res, 'Invoice not found', 404);
 
-    return successResponse(res, { invoice });
+    const freshInstructions = await buildFreshInstructions(invoice);
+
+    return successResponse(res, {
+        invoice: { ...invoice, paymentInstructions: freshInstructions },
+    });
 });
 
 module.exports = {

@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const Invoice = require('../../models/admin/Invoice');
 const Payment = require('../../models/admin/Payment');
 const User = require('../../models/farm/User');
@@ -6,6 +8,21 @@ const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
+
+const MPESA_LOG = path.join(__dirname, '..', '..', 'logs', 'mpesa.log');
+const ensureLogDir = () => {
+    const dir = path.dirname(MPESA_LOG);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+};
+const mlog = (label, data) => {
+    try {
+        ensureLogDir();
+        const body = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        const line = `[${new Date().toISOString()}] ${label}\n${body}\n${'─'.repeat(60)}\n`;
+        fs.appendFileSync(MPESA_LOG, line, 'utf8');
+    } catch {}
+    console.log(`[MPESA] ${label}`, data ?? '');
+};
 
 async function markInvoicePaid(invoice, parsed) {
     invoice.status = 'paid';
@@ -83,14 +100,19 @@ async function handleSuccess(payment, parsed) {
         : await Invoice.findOne({ 'stkLastRequest.checkoutRequestId': parsed.checkoutRequestId });
 
     if (!invoice) {
-        logger.warn(`Invoice not found for checkoutRequestId ${parsed.checkoutRequestId}`);
+        mlog('HANDLE SUCCESS — INVOICE NOT FOUND', { checkoutRequestId: parsed.checkoutRequestId });
         return;
     }
 
     await markInvoicePaid(invoice, parsed);
     const user = await markUserPaid(invoice.user);
 
-    logger.info(`Invoice ${invoice.invoiceNumber} paid. Receipt: ${parsed.mpesaReceiptNumber}`);
+    mlog('INVOICE MARKED PAID', {
+        invoiceNumber: invoice.invoiceNumber,
+        amountPaid: invoice.amountPaid,
+        receipt: parsed.mpesaReceiptNumber,
+        userId: invoice.user,
+    });
 
     await notifyFarmer(user, invoice, parsed);
     await notifyAdmins(invoice, user, parsed);
@@ -102,7 +124,7 @@ async function handleFailure(payment, parsed) {
         : await Invoice.findOne({ 'stkLastRequest.checkoutRequestId': parsed.checkoutRequestId });
 
     if (!invoice) {
-        logger.warn(`Invoice not found for failed payment ${parsed.checkoutRequestId}`);
+        mlog('HANDLE FAILURE — INVOICE NOT FOUND', { checkoutRequestId: parsed.checkoutRequestId });
         return;
     }
 
@@ -111,21 +133,44 @@ async function handleFailure(payment, parsed) {
     invoice.paymentRef = parsed.resultDesc || 'Failed';
     await invoice.save();
 
-    logger.warn(`Invoice ${invoice.invoiceNumber} payment failed: ${parsed.resultDesc}`);
+    mlog('INVOICE MARKED FAILED', {
+        invoiceNumber: invoice.invoiceNumber,
+        resultCode: parsed.resultCode,
+        resultDesc: parsed.resultDesc,
+    });
 }
 
 const mpesaCallback = asyncHandler(async (req, res) => {
     const payload = req.body;
+
+    mlog('CALLBACK RECEIVED', {
+        headers: {
+            'content-type': req.headers['content-type'],
+            'user-agent': req.headers['user-agent'],
+            'x-forwarded-for': req.headers['x-forwarded-for'] || req.ip,
+        },
+        body: payload,
+    });
+
     const parsed = mpesaService.parseCallback(payload);
+
+    mlog('CALLBACK PARSED', {
+        checkoutRequestId: parsed.checkoutRequestId,
+        merchantRequestId: parsed.merchantRequestId,
+        success: parsed.success,
+        resultCode: parsed.resultCode,
+        resultDesc: parsed.resultDesc,
+        mpesaReceipt: parsed.mpesaReceiptNumber,
+        amount: parsed.amount,
+        phoneNumber: parsed.phoneNumber,
+    });
 
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
     if (!parsed.checkoutRequestId) {
-        logger.warn('M-Pesa callback without checkoutRequestId');
+        mlog('CALLBACK WITHOUT CHECKOUT REQUEST ID', payload);
         return;
     }
-
-    logger.info(`M-Pesa callback: ${parsed.checkoutRequestId} success=${parsed.success} receipt=${parsed.mpesaReceiptNumber || 'N/A'}`);
 
     const payment = await Payment.findOne({
         $or: [
@@ -135,7 +180,7 @@ const mpesaCallback = asyncHandler(async (req, res) => {
     });
 
     if (!payment) {
-        logger.warn(`Payment not found for ${parsed.checkoutRequestId}`);
+        mlog('CALLBACK — PAYMENT NOT FOUND', { checkoutRequestId: parsed.checkoutRequestId });
         return;
     }
 
@@ -147,6 +192,8 @@ const mpesaCallback = asyncHandler(async (req, res) => {
     }
     await payment.save();
 
+    mlog('PAYMENT UPDATED', { paymentId: String(payment._id), status: payment.status });
+
     try {
         if (parsed.success) {
             await handleSuccess(payment, parsed);
@@ -154,12 +201,13 @@ const mpesaCallback = asyncHandler(async (req, res) => {
             await handleFailure(payment, parsed);
         }
     } catch (err) {
+        mlog('CALLBACK HANDLING ERROR', err.message);
         logger.error(`Payment handling failed: ${err.message}`);
     }
 });
 
 const mpesaTimeout = asyncHandler(async (req, res) => {
-    logger.warn(`M-Pesa timeout: ${JSON.stringify(req.body)}`);
+    mlog('CALLBACK TIMEOUT', req.body);
     return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 });
 

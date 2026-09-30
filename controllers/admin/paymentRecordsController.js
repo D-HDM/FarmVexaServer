@@ -1,6 +1,7 @@
 const Payment = require('../../models/admin/Payment');
 const Invoice = require('../../models/admin/Invoice');
 const User = require('../../models/farm/User');
+const mpesaService = require('../../services/mpesaService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
@@ -17,7 +18,7 @@ const getAllPayments = asyncHandler(async (req, res) => {
 
     const payments = await Payment.find(query)
         .populate('user', 'name email phone selectedPlan subscriptionExpiry')
-        .populate('invoice', 'invoiceNumber amountPaid amountDue currency')
+        .populate('invoice', 'invoiceNumber amountPaid amountDue currency status')
         .populate('verifiedBy', 'name email')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
@@ -65,7 +66,7 @@ const getPaymentById = asyncHandler(async (req, res) => {
     return successResponse(res, { payment });
 });
 
-/* ============ VERIFY PAYMENT (manual success) ============ */
+/* ============ VERIFY PAYMENT (queries Safaricom first) ============ */
 const verifyPayment = asyncHandler(async (req, res) => {
     const payment = await Payment.findById(req.params.id);
     if (!payment) return errorResponse(res, 'Payment not found', 404);
@@ -74,11 +75,47 @@ const verifyPayment = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Payment already verified', 400);
     }
 
+    if (!payment.checkoutRequestId) {
+        return errorResponse(res, 'Payment has no checkoutRequestId to query', 400);
+    }
+
+    const query = await mpesaService.querySTKStatus(payment.checkoutRequestId);
+
+    if (!query.success) {
+        return errorResponse(
+            res,
+            query.error?.errorMessage || 'Failed to query Safaricom',
+            502
+        );
+    }
+
+    const resultCode = String(query.resultCode);
     const now = new Date();
+
+    if (resultCode !== '0') {
+        payment.status = 'failed';
+        payment.verifiedBy = req.user.id;
+        payment.verifiedAt = now;
+        payment.providerPayload = {
+            ...(payment.providerPayload || {}),
+            manualVerifyQuery: query,
+        };
+        await payment.save();
+
+        return errorResponse(
+            res,
+            `Safaricom reports: ${query.resultDesc} (code ${resultCode})`,
+            400
+        );
+    }
 
     payment.status = 'success';
     payment.verifiedBy = req.user.id;
     payment.verifiedAt = now;
+    payment.providerPayload = {
+        ...(payment.providerPayload || {}),
+        manualVerifyQuery: query,
+    };
     await payment.save();
 
     if (payment.invoice) {
@@ -89,7 +126,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
             invoice.amountDue = 0;
             invoice.paidAt = now;
             invoice.paymentMethod = payment.method;
-            invoice.paymentRef = payment.providerRef || payment.mpesaReceipt || null;
+            invoice.paymentRef = payment.mpesaReceipt || payment.providerRef || null;
             await invoice.save();
         }
     }
@@ -99,14 +136,14 @@ const verifyPayment = asyncHandler(async (req, res) => {
         if (user) {
             user.paymentStatus = 'paid';
             user.paymentMethod = payment.method;
-            user.paymentReference = payment.providerRef || payment.mpesaReceipt || null;
+            user.paymentReference = payment.mpesaReceipt || payment.providerRef || null;
             user.paymentDate = now;
             await user.save();
         }
     }
 
-    logger.info(`Payment ${payment._id} verified by admin ${req.user.id}`);
-    return successResponse(res, { payment }, 'Payment verified');
+    logger.info(`Payment ${payment._id} verified against Safaricom by admin ${req.user.id}`);
+    return successResponse(res, { payment, safaricom: query }, 'Payment verified');
 });
 
 /* ============ REJECT PAYMENT ============ */

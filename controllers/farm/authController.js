@@ -9,6 +9,7 @@ const invoiceService = require('../../services/invoiceService');
 const emailService = require('../../services/emailService');
 const smsService = require('../../services/smsService');
 const planService = require('../../services/planService');
+const paymentInstructionsService = require('../../services/paymentInstructionsService');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
@@ -24,6 +25,21 @@ const generateRefreshToken = (user) => jwt.sign(
     process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
 );
+
+async function withFreshInstructions(invoice) {
+    if (!invoice) return null;
+    try {
+        const fresh = await paymentInstructionsService.getPaymentInstructions({
+            amount: invoice.amountDue ?? invoice.total,
+            currency: invoice.currency || 'KES',
+            invoiceNumber: invoice.invoiceNumber,
+        });
+        return { ...invoice, paymentInstructions: fresh };
+    } catch (err) {
+        logger.error(`Fresh instructions failed for ${invoice.invoiceNumber}: ${err.message}`);
+        return invoice;
+    }
+}
 
 const register = asyncHandler(async (req, res) => {
     const { name, email, phone, password, county, subCounty, plan } = req.body;
@@ -188,10 +204,11 @@ const login = asyncHandler(async (req, res) => {
 
     let invoice = null;
     if (user.approvalStatus === 'pending' || user.paymentStatus !== 'paid') {
-        invoice = await Invoice.findOne({
+        const raw = await Invoice.findOne({
             user: user._id,
             status: { $in: ['sent', 'draft'] },
         }).sort({ createdAt: -1 }).lean();
+        invoice = await withFreshInstructions(raw);
     }
 
     user.lastLogin = new Date();
@@ -233,7 +250,11 @@ const login = asyncHandler(async (req, res) => {
 const getMe = asyncHandler(async (req, res) => {
     const user = req.user;
     const scope = req.scope;
-    const invoice = req.invoice;
+    let invoice = req.invoice;
+
+    if (invoice) {
+        invoice = await withFreshInstructions(invoice);
+    }
 
     return successResponse(res, {
         user: {
