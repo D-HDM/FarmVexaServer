@@ -11,10 +11,20 @@ const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
+function isHttpUrl(value) {
+    if (!value || typeof value !== 'string') return false;
+    try {
+        const u = new URL(value);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
 const checkFieldScanAccess = async (userId, fieldId) => {
     const settings = await Settings.findOne();
     const fieldScanSettings = settings?.fieldScan || {};
-    
+
     if (!fieldScanSettings.enabled) {
         return { allowed: false, reason: 'Field scan is currently disabled' };
     }
@@ -105,6 +115,23 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     if (!cropType) return errorResponse(res, 'cropType is required', 400);
     if (!frames || frames.length === 0) return errorResponse(res, 'frames are required', 400);
 
+    const frameUrls = (frames || []).map((f) => f?.imageUrl);
+    const invalidUrls = frameUrls.filter((u) => !isHttpUrl(u));
+
+    logger.info(`[FieldScan:controller] user=${req.user.id} field=${fieldId} crop=${cropType} frames=${frames.length} invalidUrls=${invalidUrls.length}`);
+
+    if (invalidUrls.length > 0) {
+        invalidUrls.slice(0, 10).forEach((u, i) => {
+            const short = typeof u === 'string' ? u.slice(0, 140) : String(u);
+            logger.warn(`[FieldScan:controller] badUrl[${i}]=${short}`);
+        });
+    }
+
+    frameUrls.slice(0, 5).forEach((u, i) => {
+        const short = typeof u === 'string' ? u.slice(0, 140) : String(u);
+        logger.info(`[FieldScan:controller] frame[${i}]=${short}`);
+    });
+
     const field = await Field.findById(fieldId);
     if (!field) return errorResponse(res, 'Field not found', 404);
 
@@ -119,7 +146,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     const access = await checkFieldScanAccess(req.user.id, fieldId);
     if (!access.allowed) return errorResponse(res, access.reason, 429);
 
-    // Create scan record
     const scan = await FieldScan.create({
         user: req.user.id,
         farm: farmId,
@@ -129,7 +155,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         status: 'processing',
     });
 
-    // Call Python AI
     let aiResult;
     try {
         aiResult = await fieldScanService.analyzeFieldScan(
@@ -144,9 +169,9 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.status = 'failed';
         scan.errorMessage = aiError.message;
         await scan.save();
-        
+
         await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiError.message });
-        
+
         return errorResponse(res, aiError.message || 'Field scan analysis failed', 500);
     }
 
@@ -154,13 +179,12 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.status = 'failed';
         scan.errorMessage = aiResult.message || 'Analysis failed';
         await scan.save();
-        
+
         await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiResult.message });
-        
+
         return errorResponse(res, aiResult.message || 'Field scan analysis failed', 500);
     }
 
-    // Update scan with results
     const data = aiResult.data || {};
     const keyUsage = data.keyUsage || {};
     const analyzedFrames = data.analyzedFrames || 0;
@@ -179,7 +203,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     scan.keyUsage = keyUsage;
     await scan.save();
 
-    // === CREATE ALERTS FOR DISEASES ===
     if (scan.summary?.diseases?.length > 0) {
         try {
             const severityMap = {
@@ -190,13 +213,11 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                 critical: 'critical',
             };
 
-            // Deduplicate by disease name
             const uniqueDiseases = [...new Set(scan.summary.diseases.map(d => d.name))];
-            
+
             for (const diseaseName of uniqueDiseases) {
                 const diseaseInstances = scan.summary.diseases.filter(d => d.name === diseaseName);
-                
-                // Get highest severity
+
                 const severityOrder = { low: 0, moderate: 1, medium: 1, high: 2, critical: 3 };
                 const highestSeverity = diseaseInstances.reduce((max, d) => {
                     return severityOrder[d.severity] > severityOrder[max] ? d.severity : max;
@@ -218,14 +239,13 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                     },
                 });
             }
-            
+
             logger.info(`[Field Scan] Created ${uniqueDiseases.length} disease alerts for scan ${scan._id}`);
         } catch (alertError) {
             logger.error(`[Field Scan] Alert creation failed: ${alertError.message}`);
         }
     }
 
-    // Log usage with full metadata
     const metadata = {
         scanId: scan._id,
         totalFrames: scan.totalFrames,
@@ -247,13 +267,12 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         metadata
     );
 
-    // Send email
     try {
         const emailToggles = settings?.emailToggles || {};
         if (emailToggles.farmerFieldScanResults !== false) {
             const user = await User.findById(req.user.id);
             const summary = scan.summary || {};
-            
+
             await emailService.send(
                 user.email,
                 'farmerFieldScanResults',
