@@ -17,14 +17,15 @@ const cropImageSchema = new mongoose.Schema({
     storageType: {
         type: String,
         enum: ['local', 'cloudinary'],
-        default: 'local',
+        default: 'cloudinary',
     },
     cloudinaryId: String,
     diseaseDetected: String,
     confidence: Number,
     severity: {
         type: String,
-        enum: ['low', 'moderate', 'high'],
+        enum: ['none', 'low', 'moderate', 'high', null],
+        default: 'low',
     },
     symptoms: String,
     healthScore: Number,
