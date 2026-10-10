@@ -1,6 +1,5 @@
 const axios = require('axios');
 const FormData = require('form-data');
-const fs = require('fs');
 const { env } = require('../config/env');
 const logger = require('../utils/logger');
 
@@ -24,10 +23,17 @@ class AIService {
         }
     }
 
-    async analyzeCropImage(imagePath, cropType, sensorData = null) {
+    async analyzeCropImage(imageBuffer, cropType, sensorData = null) {
         try {
+            if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+                throw new Error('analyzeCropImage: expected a Buffer');
+            }
+
             const formData = new FormData();
-            formData.append('cropImage', fs.createReadStream(imagePath));
+            formData.append('cropImage', imageBuffer, {
+                filename: `crop_${Date.now()}.jpg`,
+                contentType: 'image/jpeg',
+            });
             formData.append('task', sensorData ? 'combined_analysis' : 'image_analysis');
             if (cropType) formData.append('cropType', cropType);
             if (sensorData) formData.append('sensorData', JSON.stringify(sensorData));
@@ -35,7 +41,12 @@ class AIService {
             const response = await axios.post(
                 `${this.baseUrl}/api/analyze/crop`,
                 formData,
-                { headers: { ...formData.getHeaders(), 'x-api-key': this.apiKey }, timeout: 60000 }
+                {
+                    headers: { ...formData.getHeaders(), 'x-api-key': this.apiKey },
+                    timeout: 60000,
+                    maxBodyLength: Infinity,
+                    maxContentLength: Infinity,
+                }
             );
             return response.data;
         } catch (error) {

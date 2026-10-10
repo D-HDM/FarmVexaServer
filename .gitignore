@@ -40,20 +40,11 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Uploads
-uploads/*
-!uploads/.gitkeep
-temp/*
-!temp/.gitkeep
-backups/*
-!backups/.gitkeep
-
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
-dist/
 *.egg
 venv/
 env/

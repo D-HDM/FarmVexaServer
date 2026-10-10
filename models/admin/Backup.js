@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const backupSchema = new mongoose.Schema({
     filename: { type: String, required: true },
+    cloudinaryUrl: { type: String, default: null },
+    cloudinaryPublicId: { type: String, default: null },
     size: { type: Number },
     collections: { type: Number },
     documents: { type: Number },

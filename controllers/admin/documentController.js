@@ -1,12 +1,11 @@
 const Document = require('../../models/admin/Document');
-const { uploadFile, deleteFile } = require('../../config/cloudinary');
+const { uploadBufferToCloudinary, destroyFromCloudinary } = require('../../utils/cloudinaryUpload');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
-const fs = require('fs');
 const logger = require('../../utils/logger');
 
 const uploadDocument = asyncHandler(async (req, res) => {
-    if (!req.file) return errorResponse(res, 'No file provided', 400);
+    if (!req.file || !req.file.buffer) return errorResponse(res, 'No file provided', 400);
 
     const { name, type, version, platform, visibility } = req.body;
 
@@ -18,7 +17,6 @@ const uploadDocument = asyncHandler(async (req, res) => {
         return errorResponse(res, `Invalid type. Allowed: ${allowedTypes.join(', ')}`, 400);
     }
 
-    // Default visibility by type
     const defaultVisibility = {
         user_guide: 'farmer',
         copyright: 'admin',
@@ -30,20 +28,20 @@ const uploadDocument = asyncHandler(async (req, res) => {
     };
 
     try {
-        const fileExt = req.file.originalname.split('.').pop() || 'pdf';
-        const uploadResult = await uploadFile(req.file.path, {
-            folder: 'farmvexa/documents',
-            resource_type: 'raw',
-        });
+        const fileExt = (req.file.originalname.split('.').pop() || 'pdf').toLowerCase();
 
-        fs.unlink(req.file.path, () => {});
+        const result = await uploadBufferToCloudinary(req.file.buffer, {
+            folder: 'farmvexa/documents',
+            resourceType: 'raw',
+            filename: `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`,
+        });
 
         const document = await Document.create({
             name,
             type,
             visibility: visibility || defaultVisibility[type] || 'public',
-            cloudinaryUrl: uploadResult.url,
-            cloudinaryPublicId: uploadResult.public_id,
+            cloudinaryUrl: result.secure_url,
+            cloudinaryPublicId: result.public_id,
             fileType: fileExt,
             fileSize: req.file.size,
             version: version || '1.0.0',
@@ -54,7 +52,6 @@ const uploadDocument = asyncHandler(async (req, res) => {
 
         return successResponse(res, { document }, 'Document uploaded', 201);
     } catch (error) {
-        fs.unlink(req.file.path, () => {});
         logger.error(`Document upload failed: ${error.message}`);
         return errorResponse(res, `Upload failed: ${error.message}`, 500);
     }
@@ -100,7 +97,7 @@ const deleteDocument = asyncHandler(async (req, res) => {
     if (!document) return errorResponse(res, 'Document not found', 404);
 
     try {
-        await deleteFile(document.cloudinaryPublicId, 'raw');
+        await destroyFromCloudinary(document.cloudinaryPublicId, 'raw');
     } catch (error) {
         logger.warn(`Cloudinary delete failed: ${error.message}`);
     }

@@ -1,29 +1,23 @@
 const mongoose = require('mongoose');
-const fs = require('fs');
-const path = require('path');
+const axios = require('axios');
 const Backup = require('../models/admin/Backup');
+const { uploadBufferToCloudinary, destroyFromCloudinary } = require('../utils/cloudinaryUpload');
 const logger = require('../utils/logger');
 
-const BACKUP_DIR = path.join(__dirname, '..', 'backups');
-
-if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
+const EXCLUDED_COLLECTIONS = [
+    'backups',
+    'briefinglogs',
+    'usages',
+    'notificationlogs',
+    'chats',
+    'sensordata',
+    'healthrecords',
+];
 
 class BackupService {
     async createBackup(adminId) {
         const db = mongoose.connection.db;
         const collections = await db.listCollections().toArray();
-        
-        const excludedCollections = [
-            'backups',
-            'briefinglogs',
-            'usages',
-            'notificationlogs',
-            'chats',
-            'sensordata',
-            'healthrecords',
-        ];
 
         const backupData = {
             metadata: {
@@ -39,7 +33,7 @@ class BackupService {
         let totalDocuments = 0;
 
         for (const col of collections) {
-            if (excludedCollections.includes(col.name)) continue;
+            if (EXCLUDED_COLLECTIONS.includes(col.name)) continue;
 
             const docs = await db.collection(col.name).find().toArray();
             backupData.data[col.name] = docs;
@@ -47,42 +41,52 @@ class BackupService {
             totalDocuments += docs.length;
         }
 
-        const filename = `farmvexa_backup_${Date.now()}.json`;
-        const filePath = path.join(BACKUP_DIR, filename);
-        fs.writeFileSync(filePath, JSON.stringify(backupData, null, 2));
+        const jsonString = JSON.stringify(backupData, null, 2);
+        const buffer = Buffer.from(jsonString, 'utf8');
+        const publicId = `farmvexa_backup_${Date.now()}`;
 
-        const stats = fs.statSync(filePath);
+        const uploadResult = await uploadBufferToCloudinary(buffer, {
+            folder: 'farmvexa/backups',
+            resourceType: 'raw',
+            publicId,
+            format: 'json',
+        });
+
         const backup = await Backup.create({
-            filename,
-            size: stats.size,
+            filename: `${publicId}.json`,
+            cloudinaryUrl: uploadResult.secure_url,
+            cloudinaryPublicId: uploadResult.public_id,
+            size: buffer.length,
             collections: backupData.metadata.collections.length,
             documents: totalDocuments,
             status: 'created',
             createdBy: adminId,
         });
 
-        logger.info(`Backup created: ${filename} (${totalDocuments} documents, ${backupData.metadata.collections.length} collections)`);
+        logger.info(`Backup created: ${publicId} (${totalDocuments} docs, ${backupData.metadata.collections.length} collections)`);
         return backup;
     }
 
-    async restoreBackup(filename) {
-        const filePath = path.join(BACKUP_DIR, filename);
-        if (!fs.existsSync(filePath)) throw new Error('Backup file not found');
+    async restoreBackup(backupId) {
+        const backup = await Backup.findById(backupId);
+        if (!backup) throw new Error('Backup not found');
+        if (!backup.cloudinaryUrl) throw new Error('Backup has no Cloudinary URL');
 
-        const backupData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const response = await axios.get(backup.cloudinaryUrl, { responseType: 'text', timeout: 60000 });
+        const backupData = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+
         const db = mongoose.connection.db;
 
         for (const colName of Object.keys(backupData.data)) {
             const docs = backupData.data[colName];
-            if (docs.length === 0) continue;
+            if (!docs || docs.length === 0) continue;
 
-            // Drop existing collection and recreate
             await db.collection(colName).drop().catch(() => {});
             await db.createCollection(colName);
             await db.collection(colName).insertMany(docs);
         }
 
-        logger.info(`Backup restored: ${filename}`);
+        logger.info(`Backup restored: ${backup.filename}`);
         return backupData.metadata;
     }
 
@@ -98,8 +102,9 @@ class BackupService {
         const backup = await Backup.findById(id);
         if (!backup) throw new Error('Backup not found');
 
-        const filePath = path.join(BACKUP_DIR, backup.filename);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        if (backup.cloudinaryPublicId) {
+            await destroyFromCloudinary(backup.cloudinaryPublicId, 'raw');
+        }
 
         await Backup.findByIdAndDelete(id);
         logger.info(`Backup deleted: ${backup.filename}`);

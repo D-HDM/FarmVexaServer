@@ -1,50 +1,54 @@
 const cloudinary = require('cloudinary').v2;
-const fs = require('fs');
-const path = require('path');
+const streamifier = require('streamifier');
 
-// Check storage type
-const STORAGE_TYPE = process.env.STORAGE_TYPE || 'local';
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+});
 
-// Cloudinary setup (only if using cloud)
-if (STORAGE_TYPE === 'cloudinary') {
-    cloudinary.config({
-        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-        api_key: process.env.CLOUDINARY_API_KEY,
-        api_secret: process.env.CLOUDINARY_API_SECRET,
+async function uploadFile(buffer, options = {}) {
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+        throw new Error('uploadFile: expected a Buffer');
+    }
+
+    const {
+        folder = process.env.CLOUDINARY_FOLDER || 'farmvexa/crops',
+        resource_type = 'image',
+        ...rest
+    } = options;
+
+    return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+            { folder, resource_type, ...rest },
+            (err, result) => {
+                if (err) return reject(err);
+                resolve({
+                    url: result.secure_url,
+                    public_id: result.public_id,
+                    format: result.format,
+                    bytes: result.bytes,
+                    width: result.width,
+                    height: result.height,
+                    storage: 'cloudinary',
+                });
+            }
+        );
+        streamifier.createReadStream(buffer).pipe(stream);
     });
-    console.log('✅ Cloudinary Configured');
 }
 
-// Local storage setup
-const LOCAL_UPLOAD_PATH = process.env.LOCAL_UPLOAD_PATH || 'uploads';
-
-if (!fs.existsSync(LOCAL_UPLOAD_PATH)) {
-    fs.mkdirSync(LOCAL_UPLOAD_PATH, { recursive: true });
+async function deleteFile(publicId, resourceType = 'image') {
+    if (!publicId) return null;
+    try {
+        return await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    } catch (err) {
+        return null;
+    }
 }
 
-const uploadFile = async (filePath, options = {}) => {
-    if (STORAGE_TYPE === 'cloudinary') {
-        const result = await cloudinary.uploader.upload(filePath, {
-            folder: process.env.CLOUDINARY_FOLDER || 'farmvexa/crops',
-            ...options,
-        });
-        return { url: result.secure_url, public_id: result.public_id, storage: 'cloudinary' };
-    } else {
-        const filename = path.basename(filePath);
-        const destPath = path.join(LOCAL_UPLOAD_PATH, filename);
-        fs.copyFileSync(filePath, destPath);
-        return { url: `/uploads/${filename}`, path: destPath, storage: 'local' };
-    }
-};
-
-const deleteFile = async (publicIdOrPath) => {
-    if (STORAGE_TYPE === 'cloudinary') {
-        await cloudinary.uploader.destroy(publicIdOrPath);
-    } else {
-        if (fs.existsSync(publicIdOrPath)) {
-            fs.unlinkSync(publicIdOrPath);
-        }
-    }
-};
-
-module.exports = { uploadFile, deleteFile, STORAGE_TYPE, LOCAL_UPLOAD_PATH };
+module.exports = cloudinary;
+module.exports.uploadFile = uploadFile;
+module.exports.deleteFile = deleteFile;
+module.exports.cloudinary = cloudinary;

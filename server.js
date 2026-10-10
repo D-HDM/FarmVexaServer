@@ -20,7 +20,6 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(corsMiddleware);
 app.use(generalLimiter);
-app.use('/uploads', express.static('uploads'));
 
 app.get('/', (req, res) => res.json({ success: true, service: 'FarmVexa API', version: '1.0.0', environment: env.nodeEnv }));
 app.get('/api', (req, res) => res.json({ success: true, service: 'FarmVexa API', version: '1.0.0', endpoints: { health: '/api/health', admin: '/api/admin', farm: '/api/farm' } }));
@@ -34,10 +33,10 @@ app.use(errorHandler);
 
 const PORT = env.port;
 const server = app.listen(PORT, () => {
-    console.log(`\x1b[36m🚀 FarmVexa Server\x1b[0m → Port ${PORT} [${env.nodeEnv}]`);
-    console.log(`\x1b[32m🔗 API:\x1b[0m ${env.apiUrl}`);
-    console.log(`\x1b[32m🧠 AI:\x1b[0m ${env.pythonAiUrl}`);
-    console.log(`\x1b[32m💳 M-Pesa:\x1b[0m ${env.mpesa.env} (${env.mpesa.shortcode || 'not configured'})`);
+    console.log(`\x1b[36mFarmVexa Server\x1b[0m -> Port ${PORT} [${env.nodeEnv}]`);
+    console.log(`\x1b[32mAPI:\x1b[0m ${env.apiUrl}`);
+    console.log(`\x1b[32mAI:\x1b[0m ${env.pythonAiUrl}`);
+    console.log(`\x1b[32mM-Pesa:\x1b[0m ${env.mpesa.env} (${env.mpesa.shortcode || 'not configured'})`);
     startSchedulers();
 });
 

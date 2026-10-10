@@ -1,35 +1,35 @@
 const multer = require('multer');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, `${uuidv4()}${ext}`);
-    },
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: {
+        fileSize: 10 * 1024 * 1024,
+        files: 10,
+    },
     fileFilter: (req, file, cb) => {
         const allowedMimes = [
-            // Images
             'image/jpeg',
+            'image/jpg',
             'image/png',
             'image/webp',
-            // Documents
+            'image/gif',
+            'image/heic',
+            'image/heif',
             'application/pdf',
             'text/html',
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
 
-        const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.html', '.htm', '.doc', '.docx'];
-        const ext = path.extname(file.originalname).toLowerCase();
+        const allowedExts = [
+            '.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif',
+            '.pdf', '.html', '.htm', '.doc', '.docx',
+        ];
+
+        const ext = path.extname(file.originalname || '').toLowerCase();
 
         if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
             cb(null, true);

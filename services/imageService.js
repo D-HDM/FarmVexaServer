@@ -3,13 +3,14 @@ const SensorReading = require('../models/farm/SensorReading');
 const Field = require('../models/farm/Field');
 const aiService = require('./aiService');
 const alertService = require('./alertService');
-const { uploadFile, deleteFile } = require('../config/cloudinary');
+const { uploadFile } = require('../config/cloudinary');
 const logger = require('../utils/logger');
 
 class ImageService {
-    async uploadAndAnalyze(imagePath, fieldId, cropType, userId) {
-        const uploadResult = await uploadFile(imagePath, {
+    async uploadAndAnalyze(imageBuffer, fieldId, cropType, userId) {
+        const uploadResult = await uploadFile(imageBuffer, {
             folder: `farmvexa/${fieldId}`,
+            resource_type: 'image',
         });
 
         const field = await Field.findById(fieldId);
@@ -19,7 +20,7 @@ class ImageService {
             field: fieldId,
             cropType,
             imageUrl: uploadResult.url,
-            storageType: uploadResult.storage,
+            storageType: 'cloudinary',
             cloudinaryId: uploadResult.public_id,
             status: 'analyzing',
         });
@@ -29,11 +30,7 @@ class ImageService {
                 .sort({ timestamp: -1 })
                 .lean();
 
-            const aiResult = await aiService.analyzeCropImage(
-                imagePath,
-                cropType,
-                latestReading
-            );
+            const aiResult = await aiService.analyzeCropImage(imageBuffer, cropType, latestReading);
 
             if (aiResult.success && aiResult.data) {
                 const analysis = aiResult.data.image_analysis || aiResult.data;

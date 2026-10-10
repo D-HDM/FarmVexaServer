@@ -1,9 +1,12 @@
 const backupService = require('../../services/backupService');
-const emailService = require('../../services/emailService');
+const Backup = require('../../models/admin/Backup');
 const Settings = require('../../models/admin/Settings');
-const path = require('path');
+const { uploadBufferToCloudinary } = require('../../utils/cloudinaryUpload');
+const { sendEmail } = require('../../config/hdmBridge');
+const axios = require('axios');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
+const logger = require('../../utils/logger');
 
 const listBackups = asyncHandler(async (req, res) => {
     const backups = await backupService.listBackups();
@@ -16,66 +19,70 @@ const createBackup = asyncHandler(async (req, res) => {
 });
 
 const uploadBackup = asyncHandler(async (req, res) => {
-    if (!req.file) return errorResponse(res, 'No file uploaded', 400);
-    
-    const fs = require('fs');
-    const path = require('path');
-    const BACKUP_DIR = path.join(__dirname, '..', '..', 'backups');
-    
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    
-    const destPath = path.join(BACKUP_DIR, req.file.originalname);
-    fs.copyFileSync(req.file.path, destPath);
-    
-    const stats = fs.statSync(destPath);
-    const backup = await require('../../models/admin/Backup').create({
-        filename: req.file.originalname,
-        size: stats.size,
-        status: 'uploaded',
-        createdBy: req.user.id,
-    });
-    
-    return successResponse(res, { backup }, 'Backup uploaded');
+    if (!req.file || !req.file.buffer) return errorResponse(res, 'No file uploaded', 400);
+
+    const originalName = req.file.originalname || `manual_backup_${Date.now()}.json`;
+
+    try {
+        const result = await uploadBufferToCloudinary(req.file.buffer, {
+            folder: 'farmvexa/backups',
+            resourceType: 'raw',
+            publicId: originalName.replace(/\.[^.]+$/, ''),
+        });
+
+        const backup = await Backup.create({
+            filename: originalName,
+            cloudinaryUrl: result.secure_url,
+            cloudinaryPublicId: result.public_id,
+            size: req.file.size,
+            status: 'uploaded',
+            createdBy: req.user.id,
+        });
+
+        return successResponse(res, { backup }, 'Backup uploaded');
+    } catch (err) {
+        logger.error(`Backup upload failed: ${err.message}`);
+        return errorResponse(res, 'Backup upload failed', 500);
+    }
 });
 
 const restoreBackup = asyncHandler(async (req, res) => {
     const backup = await backupService.getBackup(req.params.id);
     if (!backup) return errorResponse(res, 'Backup not found', 404);
-    
-    const metadata = await backupService.restoreBackup(backup.filename);
+
+    const metadata = await backupService.restoreBackup(backup._id);
     return successResponse(res, { metadata }, 'Backup restored successfully');
 });
 
 const downloadBackup = asyncHandler(async (req, res) => {
     const backup = await backupService.getBackup(req.params.id);
     if (!backup) return errorResponse(res, 'Backup not found', 404);
-    
-    const BACKUP_DIR = path.join(__dirname, '..', '..', 'backups');
-    const filePath = path.join(BACKUP_DIR, backup.filename);
-    
-    if (!require('fs').existsSync(filePath)) return errorResponse(res, 'File not found', 404);
-    
-    res.download(filePath, backup.filename);
+    if (!backup.cloudinaryUrl) return errorResponse(res, 'Backup has no URL', 404);
+
+    const response = await axios.get(backup.cloudinaryUrl, { responseType: 'arraybuffer', timeout: 60000 });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${backup.filename}"`);
+    return res.send(Buffer.from(response.data));
 });
 
 const sendBackupEmail = asyncHandler(async (req, res) => {
     const { email } = req.body;
     if (!email) return errorResponse(res, 'Email required', 400);
-    
+
     const backup = await backupService.getBackup(req.params.id);
     if (!backup) return errorResponse(res, 'Backup not found', 404);
-    
-    const BACKUP_DIR = path.join(__dirname, '..', '..', 'backups');
-    const filePath = path.join(BACKUP_DIR, backup.filename);
-    
-    const fs = require('fs');
-    const attachment = fs.readFileSync(filePath);
-    
-    // Simple email with attachment
-    const { sendEmail } = require('../../config/hdmBridge');
-    await sendEmail(email, 'FarmVexa Backup', `<p>Please find attached your FarmVexa backup: <strong>${backup.filename}</strong></p>`);
-    
-    return successResponse(res, null, 'Backup email sent');
+
+    const html = `
+        <p>Your FarmVexa backup is ready.</p>
+        <p><strong>File:</strong> ${backup.filename}</p>
+        <p><strong>Documents:</strong> ${backup.documents || 0}</p>
+        <p><strong>Size:</strong> ${(backup.size / 1024).toFixed(1)} KB</p>
+        <p><a href="${backup.cloudinaryUrl}">Download Backup</a></p>
+    `;
+
+    await sendEmail(email, 'FarmVexa Backup', html);
+    return successResponse(res, { url: backup.cloudinaryUrl }, 'Backup email sent');
 });
 
 const deleteBackup = asyncHandler(async (req, res) => {
@@ -96,12 +103,12 @@ const getSettings = asyncHandler(async (req, res) => {
 const updateSettings = asyncHandler(async (req, res) => {
     const settings = await Settings.findOne();
     if (!settings) return errorResponse(res, 'Settings not found', 404);
-    
+
     if (req.body.autoBackup !== undefined) settings.system.autoBackup = req.body.autoBackup;
     if (req.body.backupFrequency) settings.system.backupFrequency = req.body.backupFrequency;
     if (req.body.backupEmail) settings.system.backupEmail = req.body.backupEmail;
     if (req.body.sendBackupEmail !== undefined) settings.system.sendBackupEmail = req.body.sendBackupEmail;
-    
+
     await settings.save();
     return successResponse(res, { settings }, 'Backup settings updated');
 });

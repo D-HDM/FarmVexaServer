@@ -2,6 +2,7 @@ const MarketProduct = require('../../models/farm/MarketProduct');
 const MarketInquiry = require('../../models/farm/MarketInquiry');
 const Farm = require('../../models/farm/Farm');
 const marketService = require('../../services/marketService');
+const { uploadBufferToCloudinary } = require('../../utils/cloudinaryUpload');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
@@ -143,18 +144,17 @@ const deleteInquiry = asyncHandler(async (req, res) => {
 });
 
 const uploadMarketImage = asyncHandler(async (req, res) => {
-    if (!req.file) return errorResponse(res, 'No image file provided', 400);
+    if (!req.file || !req.file.buffer) {
+        return errorResponse(res, 'No image file provided', 400);
+    }
 
     try {
-        const { uploadFile } = require('../../config/cloudinary');
-        const result = await uploadFile(req.file.path, {
+        const result = await uploadBufferToCloudinary(req.file.buffer, {
             folder: 'farmvexa/market',
+            resourceType: 'image',
         });
 
-        const fs = require('fs');
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-
-        return successResponse(res, { url: result.url }, 'Image uploaded');
+        return successResponse(res, { url: result.secure_url, public_id: result.public_id }, 'Image uploaded');
     } catch (err) {
         logger.error(`Market image upload failed: ${err.message}`);
         return errorResponse(res, 'Image upload failed', 500);

@@ -1,11 +1,9 @@
 const imageService = require('../../services/imageService');
 const limitService = require('../../services/limitService');
 const Field = require('../../models/farm/Field');
-const TeamMember = require('../../models/farm/TeamMember');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
-const fs = require('fs');
-const path = require('path');
+const { deleteFile } = require('../../config/cloudinary');
 const axios = require('axios');
 const logger = require('../../utils/logger');
 
@@ -15,45 +13,31 @@ const uploadAndAnalyze = asyncHandler(async (req, res) => {
     if (!req.file && !cropImageUrl) {
         return errorResponse(res, 'No image file provided', 400);
     }
-
     if (!fieldId) return errorResponse(res, 'fieldId is required', 400);
     if (!cropType) return errorResponse(res, 'cropType is required', 400);
 
     const limitCheck = await limitService.checkLimit(req.user.id);
     if (!limitCheck.allowed) return errorResponse(res, limitCheck.reason, 429);
 
-    let imagePath = req.file?.path;
-    let isDownloaded = false;
+    let buffer;
 
-    // If image URL provided, download it first
-    if (cropImageUrl && !req.file) {
+    if (req.file) {
+        buffer = req.file.buffer;
+    } else {
         try {
-            const response = await axios.get(cropImageUrl, { 
+            const response = await axios.get(cropImageUrl, {
                 responseType: 'arraybuffer',
                 timeout: 30000,
+                maxContentLength: 20 * 1024 * 1024,
             });
-
-            const uploadDir = path.join(__dirname, '../../uploads');
-            if (!fs.existsSync(uploadDir)) {
-                fs.mkdirSync(uploadDir, { recursive: true });
-            }
-
-            imagePath = path.join(uploadDir, `url_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`);
-            fs.writeFileSync(imagePath, response.data);
-            isDownloaded = true;
-        } catch (downloadError) {
-            logger.error(`Image URL download failed: ${downloadError.message}`);
+            buffer = Buffer.from(response.data);
+        } catch (err) {
+            logger.error(`Image URL download failed: ${err.message}`);
             return errorResponse(res, 'Failed to download image from URL', 400);
         }
     }
 
-    // Analyze the image
-    const result = await imageService.uploadAndAnalyze(imagePath, fieldId, cropType, req.user.id);
-
-    // Clean up temp file if we downloaded it
-    if (isDownloaded && imagePath) {
-        fs.unlink(imagePath, () => {});
-    }
+    const result = await imageService.uploadAndAnalyze(buffer, fieldId, cropType, req.user.id);
 
     let farmId = null;
     const field = await Field.findById(fieldId);
@@ -80,12 +64,7 @@ const deleteImage = asyncHandler(async (req, res) => {
     if (!image) return errorResponse(res, 'Image not found', 404);
 
     if (image.cloudinaryId) {
-        try {
-            const { deleteFile } = require('../../config/cloudinary');
-            await deleteFile(image.cloudinaryId);
-        } catch (error) {
-            logger.warn(`Cloudinary delete failed: ${error.message}`);
-        }
+        await deleteFile(image.cloudinaryId, 'image');
     }
 
     await imageService.deleteImage(req.params.id);
