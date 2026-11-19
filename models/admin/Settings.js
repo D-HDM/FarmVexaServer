@@ -223,16 +223,43 @@ const weatherTestSchema = new mongoose.Schema({
     results: [weatherTestResultSchema],
 });
 
+// =========================================================================
+// AI PROVIDER ROUTING (per-feature)
+//
+// Each feature is independently configurable. `testedAt` + `testOk` + `model`
+// are populated by the admin test endpoint. Assignments require a fresh
+// passing test (see controllers/admin/settingsController.js).
+// =========================================================================
+const aiFeatureSchema = new mongoose.Schema({
+    provider: {
+        type: String,
+        enum: ['gemini', 'hdm'],
+        default: 'hdm',
+    },
+    testedAt: { type: Date, default: null },
+    testOk: { type: Boolean, default: false },
+    model: { type: String, default: '' },
+}, { _id: false });
+
+const aiSettingsSchema = new mongoose.Schema({
+    // Legacy single-provider field — kept for backward compatibility.
+    // Auto-synced to `chat.provider` on every save.
+    aiUsed: { type: String, enum: ['local', 'gemini', 'hdm'], default: 'gemini' },
+    pythonAiUrl: { type: String, default: 'http://localhost:8000' },
+    confidenceThreshold: { type: Number, default: 0.75 },
+
+    // Per-feature routing
+    chat: { type: aiFeatureSchema, default: () => ({}) },
+    crop_scan: { type: aiFeatureSchema, default: () => ({}) },
+    field_scan: { type: aiFeatureSchema, default: () => ({}) },
+}, { _id: false });
+
 const settingsSchema = new mongoose.Schema({
     gemini: {
         dailyLimitPerUser: { type: Number, default: 50 },
         dailyLimitTotal: { type: Number, default: 5000 },
     },
-    ai: {
-        aiUsed: { type: String, enum: ['local', 'gemini', 'hdm'], default: 'gemini' },
-        pythonAiUrl: { type: String, default: 'http://localhost:8000' },
-        confidenceThreshold: { type: Number, default: 0.75 },
-    },
+    ai: { type: aiSettingsSchema, default: () => ({}) },
     alerts: {
         soilMoistureLow: { type: Number, default: 20 },
         soilMoistureHigh: { type: Number, default: 80 },

@@ -2,6 +2,7 @@ const router = require('express').Router();
 const aiService = require('../../services/aiService');
 const sensorService = require('../../services/sensorService');
 const limitService = require('../../services/limitService');
+const Settings = require('../../models/admin/Settings');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 
@@ -74,6 +75,35 @@ router.post('/ai/train', asyncHandler(async (req, res) => {
 router.get('/limits/check/:userId', asyncHandler(async (req, res) => {
     const check = await limitService.checkLimit(req.params.userId);
     return successResponse(res, check);
+}));
+
+// =========================================================================
+// AI PROVIDER CONFIG (read-only from FastAPI)
+//
+// FastAPI's ai_config_service.py polls this with X-API-Key.
+// Returns the currently-assigned provider per feature. Defaults to 'hdm'
+// if a feature has never been configured.
+// =========================================================================
+router.get('/ai-config', asyncHandler(async (req, res) => {
+    let settings = await Settings.findOne();
+    if (!settings) {
+        settings = await Settings.create({});
+    }
+
+    const ai = settings.ai || {};
+    const providers = {};
+
+    for (const feature of ['chat', 'crop_scan', 'field_scan']) {
+        const f = ai[feature] || {};
+        providers[feature] = {
+            provider: f.provider || 'hdm',
+            testedAt: f.testedAt || null,
+            testOk: !!f.testOk,
+            model: f.model || '',
+        };
+    }
+
+    return successResponse(res, { providers });
 }));
 
 module.exports = router;
