@@ -11,6 +11,25 @@ const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const logger = require('../../utils/logger');
 
+// Disease values that are NOT real findings — never create alerts for these.
+const IGNORE_DISEASES = [
+    'no plant detected',
+    'no crop detected',
+    'n/a (non-crop image)',
+    'n/a',
+    'none',
+    'unknown',
+    'uncertain',
+    'unclear',
+    'healthy',
+];
+
+function isRealDisease(name) {
+    if (!name) return false;
+    const lower = String(name).trim().toLowerCase();
+    return !IGNORE_DISEASES.includes(lower);
+}
+
 function isHttpUrl(value) {
     if (!value || typeof value !== 'string') return false;
     try {
@@ -21,19 +40,14 @@ function isHttpUrl(value) {
     }
 }
 
-// Pick the key label that best represents what actually handled the scan.
-// Handles Gemini primary/backup AND HDM paths, including the case where
-// HDM was used exclusively (in which case 'hdm' wins).
 function dominantKeyLabel(keyUsage = {}) {
     const candidates = [
         { key: 'hdm', label: 'hdm' },
         { key: 'gemini_primary', label: 'gemini_primary' },
         { key: 'gemini_backup', label: 'gemini_backup' },
-        // legacy buckets kept for old data
         { key: 'fieldscan_primary', label: 'fieldscan_primary' },
         { key: 'fieldscan_backup', label: 'fieldscan_backup' },
     ];
-
     let best = null;
     for (const c of candidates) {
         const n = Number(keyUsage?.[c.key] || 0);
@@ -150,16 +164,10 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         });
     }
 
-    frameUrls.slice(0, 5).forEach((u, i) => {
-        const short = typeof u === 'string' ? u.slice(0, 140) : String(u);
-        logger.info(`[FieldScan:controller] frame[${i}]=${short}`);
-    });
-
     const field = await Field.findById(fieldId);
     if (!field) return errorResponse(res, 'Field not found', 404);
 
     const farmId = field.farm;
-
     const settings = await Settings.findOne();
     const maxPhotos = settings?.fieldScan?.maxPhotosPerScan || 100;
     if (frames.length > maxPhotos) {
@@ -192,9 +200,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.status = 'failed';
         scan.errorMessage = aiError.message;
         await scan.save();
-
         await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'gemini_primary', { scanId: scan._id, error: aiError.message });
-
         return errorResponse(res, aiError.message || 'Field scan analysis failed', 500);
     }
 
@@ -202,9 +208,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.status = 'failed';
         scan.errorMessage = aiResult.message || 'Analysis failed';
         await scan.save();
-
         await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'gemini_primary', { scanId: scan._id, error: aiResult.message });
-
         return errorResponse(res, aiResult.message || 'Field scan analysis failed', 500);
     }
 
@@ -226,6 +230,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     scan.keyUsage = keyUsage;
     await scan.save();
 
+    // ---- Alert creation — SKIP non-findings ----
     if (scan.summary?.diseases?.length > 0) {
         try {
             const severityMap = {
@@ -235,20 +240,23 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                 high: 'high',
                 critical: 'critical',
                 none: 'low',
-                uncertain: 'low',      // uncertain → low priority, not medium
+                uncertain: 'low',
+            };
+            const severityOrder = {
+                low: 0, none: 0, uncertain: 0,
+                moderate: 1, medium: 1,
+                high: 2,
+                critical: 3,
             };
 
-            const uniqueDiseases = [...new Set(scan.summary.diseases.map(d => d.name))];
+            // Filter out non-findings BEFORE grouping
+            const realDiseases = scan.summary.diseases.filter((d) => isRealDisease(d.name));
+
+            const uniqueDiseases = [...new Set(realDiseases.map((d) => d.name))];
 
             for (const diseaseName of uniqueDiseases) {
-                const diseaseInstances = scan.summary.diseases.filter(d => d.name === diseaseName);
+                const diseaseInstances = realDiseases.filter((d) => d.name === diseaseName);
 
-                const severityOrder = {
-                    low: 0, none: 0, uncertain: 0,
-                    moderate: 1, medium: 1,
-                    high: 2,
-                    critical: 3,
-                };
                 const highestSeverity = diseaseInstances.reduce((max, d) => {
                     const cur = severityOrder[d.severity] ?? 0;
                     const best = severityOrder[max] ?? 0;
@@ -267,12 +275,16 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                         count: diseaseInstances.length,
                         cropType,
                         scanId: scan._id,
-                        locations: diseaseInstances.map(d => d.location),
+                        locations: diseaseInstances.map((d) => d.location),
                     },
                 });
             }
 
-            logger.info(`[Field Scan] Created ${uniqueDiseases.length} disease alerts for scan ${scan._id}`);
+            if (uniqueDiseases.length > 0) {
+                logger.info(`[Field Scan] Created ${uniqueDiseases.length} disease alerts for scan ${scan._id}`);
+            } else {
+                logger.info(`[Field Scan] No real diseases found in scan ${scan._id} — no alerts created`);
+            }
         } catch (alertError) {
             logger.error(`[Field Scan] Alert creation failed: ${alertError.message}`);
         }
@@ -304,7 +316,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         if (emailToggles.farmerFieldScanResults !== false) {
             const user = await User.findById(req.user.id);
             const summary = scan.summary || {};
-
             await emailService.send(
                 user.email,
                 'farmerFieldScanResults',
@@ -320,7 +331,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                     healthyCount: summary.healthyCount || 0,
                     healthyPercentage: summary.healthyPercentage || 0,
                     diseaseCount: summary.diseaseCount || 0,
-                    diseases: summary.diseases || [],
+                    diseases: (summary.diseases || []).filter((d) => isRealDisease(d.name)),
                     weeds: summary.weeds || { pressure: 'None', hotspots: [] },
                     pests: summary.pests || { activity: 'None', affectedAreas: 0 },
                     recommendations: (scan.photos || [])
@@ -330,7 +341,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                     scanId: scan._id,
                 }
             );
-
             scan.emailSent = true;
             await scan.save();
         }
@@ -344,7 +354,6 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
 const getFieldScanSettings = asyncHandler(async (req, res) => {
     const settings = await Settings.findOne();
     const fieldScan = settings?.fieldScan || {};
-
     return successResponse(res, {
         enabled: fieldScan.enabled ?? false,
         maxPhotosPerScan: fieldScan.maxPhotosPerScan ?? 100,
