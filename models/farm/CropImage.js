@@ -24,7 +24,7 @@ const cropImageSchema = new mongoose.Schema({
     confidence: Number,
     severity: {
         type: String,
-        enum: ['none', 'low', 'moderate', 'high', null],
+        enum: ['none', 'low', 'moderate', 'high', 'uncertain', null],
         default: 'low',
     },
     symptoms: String,
@@ -40,6 +40,17 @@ const cropImageSchema = new mongoose.Schema({
     analysisTimestamp: Date,
 }, {
     timestamps: true,
+});
+
+// Normalize severity casing before validation.
+cropImageSchema.pre('save', function (next) {
+    if (this.severity && typeof this.severity === 'string') {
+        const s = this.severity.toLowerCase();
+        this.severity = ['none', 'low', 'moderate', 'high', 'uncertain'].includes(s)
+            ? s
+            : 'uncertain';
+    }
+    next();
 });
 
 module.exports = mongoose.model('CropImage', cropImageSchema);

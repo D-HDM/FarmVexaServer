@@ -6,16 +6,16 @@ const alertService = require('./alertService');
 const { uploadFile } = require('../config/cloudinary');
 const logger = require('../utils/logger');
 
-const ALLOWED_SEVERITY = ['low', 'moderate', 'high'];
+const ALLOWED_SEVERITY = ['low', 'moderate', 'high', 'uncertain', 'none'];
 
 function normalizeSeverity(raw) {
-    if (raw === null || raw === undefined) return 'low';
+    if (raw === null || raw === undefined) return 'uncertain';
     const value = String(raw).trim().toLowerCase();
     if (ALLOWED_SEVERITY.includes(value)) return value;
     if (value === 'medium' || value === 'medium_severity') return 'moderate';
-    if (value === 'none' || value === 'healthy' || value === 'n/a' || value === 'na') return 'low';
+    if (value === 'healthy' || value === 'n/a' || value === 'na') return 'none';
     if (value === 'critical' || value === 'severe') return 'high';
-    return 'low';
+    return 'uncertain';
 }
 
 function normalizeAlertSeverity(raw) {
@@ -23,7 +23,7 @@ function normalizeAlertSeverity(raw) {
     const value = String(raw).trim().toLowerCase();
     if (['low', 'medium', 'high', 'critical'].includes(value)) return value;
     if (value === 'moderate') return 'medium';
-    if (value === 'none' || value === 'healthy' || value === 'n/a' || value === 'na') return 'low';
+    if (value === 'uncertain' || value === 'none' || value === 'healthy' || value === 'n/a' || value === 'na') return 'low';
     if (value === 'severe') return 'high';
     return 'medium';
 }
@@ -69,7 +69,12 @@ class ImageService {
                 cropImage.symptoms = safeString(analysis.symptoms, '');
                 cropImage.recommendation = safeString(analysis.recommendation, '');
                 cropImage.healthScore = typeof aiResult.data.health_score === 'number' ? aiResult.data.health_score : null;
-                cropImage.aiUsed = process.env.AI_USED || 'gemini';
+
+                // Read provider from FastAPI's response rather than a static env var.
+                // FastAPI returns image_analysis.keyUsed ('gemini' | 'hdm').
+                const providerRaw = analysis.keyUsed || analysis.model || '';
+                cropImage.aiUsed = safeString(providerRaw, 'unknown');
+
                 cropImage.status = 'completed';
                 cropImage.analysisTimestamp = new Date();
                 await cropImage.save();
@@ -89,12 +94,13 @@ class ImageService {
                             severity: cropImage.severity,
                             cropType,
                             imageId: cropImage._id,
+                            provider: cropImage.aiUsed,
                         },
                     });
                 }
             } else {
                 cropImage.status = 'failed';
-                cropImage.severity = 'low';
+                cropImage.severity = 'uncertain';
                 cropImage.diseaseDetected = 'Analysis failed';
                 cropImage.recommendation = 'AI did not return a result. Please retry the scan.';
                 await cropImage.save();
@@ -102,7 +108,7 @@ class ImageService {
             }
         } catch (error) {
             cropImage.status = 'failed';
-            cropImage.severity = 'low';
+            cropImage.severity = 'uncertain';
             cropImage.diseaseDetected = 'Analysis failed';
             cropImage.recommendation = 'AI call failed. Please retry the scan.';
             await cropImage.save();

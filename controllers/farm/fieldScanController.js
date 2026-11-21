@@ -21,6 +21,29 @@ function isHttpUrl(value) {
     }
 }
 
+// Pick the key label that best represents what actually handled the scan.
+// Handles Gemini primary/backup AND HDM paths, including the case where
+// HDM was used exclusively (in which case 'hdm' wins).
+function dominantKeyLabel(keyUsage = {}) {
+    const candidates = [
+        { key: 'hdm', label: 'hdm' },
+        { key: 'gemini_primary', label: 'gemini_primary' },
+        { key: 'gemini_backup', label: 'gemini_backup' },
+        // legacy buckets kept for old data
+        { key: 'fieldscan_primary', label: 'fieldscan_primary' },
+        { key: 'fieldscan_backup', label: 'fieldscan_backup' },
+    ];
+
+    let best = null;
+    for (const c of candidates) {
+        const n = Number(keyUsage?.[c.key] || 0);
+        if (n > 0 && (best === null || n > best.count)) {
+            best = { count: n, label: c.label };
+        }
+    }
+    return best ? best.label : 'gemini_primary';
+}
+
 const checkFieldScanAccess = async (userId, fieldId) => {
     const settings = await Settings.findOne();
     const fieldScanSettings = settings?.fieldScan || {};
@@ -103,7 +126,7 @@ const startFieldScan = asyncHandler(async (req, res) => {
         status: 'processing',
     });
 
-    await limitService.logUsage(req.user.id, 'field_scan', true, 0, farmId, 'fieldscan_primary', { scanStatus: 'started', scanId: scan._id });
+    await limitService.logUsage(req.user.id, 'field_scan', true, 0, farmId, 'gemini_primary', { scanStatus: 'started', scanId: scan._id });
 
     return successResponse(res, { scanSession: { scanId: scan._id, fieldId, farmId, startedAt: new Date() } }, 'Field scan started', 201);
 });
@@ -170,7 +193,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.errorMessage = aiError.message;
         await scan.save();
 
-        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiError.message });
+        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'gemini_primary', { scanId: scan._id, error: aiError.message });
 
         return errorResponse(res, aiError.message || 'Field scan analysis failed', 500);
     }
@@ -180,7 +203,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         scan.errorMessage = aiResult.message || 'Analysis failed';
         await scan.save();
 
-        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'fieldscan_primary', { scanId: scan._id, error: aiResult.message });
+        await limitService.logUsage(req.user.id, 'field_scan', false, 0, farmId, 'gemini_primary', { scanId: scan._id, error: aiResult.message });
 
         return errorResponse(res, aiResult.message || 'Field scan analysis failed', 500);
     }
@@ -211,6 +234,8 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                 medium: 'medium',
                 high: 'high',
                 critical: 'critical',
+                none: 'low',
+                uncertain: 'low',      // uncertain → low priority, not medium
             };
 
             const uniqueDiseases = [...new Set(scan.summary.diseases.map(d => d.name))];
@@ -218,9 +243,16 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
             for (const diseaseName of uniqueDiseases) {
                 const diseaseInstances = scan.summary.diseases.filter(d => d.name === diseaseName);
 
-                const severityOrder = { low: 0, moderate: 1, medium: 1, high: 2, critical: 3 };
+                const severityOrder = {
+                    low: 0, none: 0, uncertain: 0,
+                    moderate: 1, medium: 1,
+                    high: 2,
+                    critical: 3,
+                };
                 const highestSeverity = diseaseInstances.reduce((max, d) => {
-                    return severityOrder[d.severity] > severityOrder[max] ? d.severity : max;
+                    const cur = severityOrder[d.severity] ?? 0;
+                    const best = severityOrder[max] ?? 0;
+                    return cur > best ? d.severity : max;
                 }, 'low');
 
                 await alertService.createAlert({
@@ -263,7 +295,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
         true,
         analyzedFrames,
         farmId,
-        keyUsage.fieldscan_backup > keyUsage.fieldscan_primary ? 'fieldscan_backup' : 'fieldscan_primary',
+        dominantKeyLabel(keyUsage),
         metadata
     );
 

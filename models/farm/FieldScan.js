@@ -8,14 +8,31 @@ const fieldScanPhotoSchema = new mongoose.Schema({
     analysis: {
         disease: { type: String, default: 'Unknown' },
         confidence: { type: Number, default: 0 },
-        severity: { type: String, enum: ['low', 'moderate', 'high', 'none'], default: 'low' },
+        severity: {
+            type: String,
+            enum: ['low', 'moderate', 'high', 'none', 'uncertain'],
+            default: 'low',
+        },
         symptoms: { type: String, default: '' },
         recommendation: { type: String, default: '' },
         weeds: { type: Boolean, default: false },
         pests: { type: Boolean, default: false },
         healthScore: { type: Number, default: 0 },
     },
-    keyUsed: { type: String, enum: ['fieldscan_primary', 'fieldscan_backup'], default: 'fieldscan_primary' },
+    keyUsed: {
+        type: String,
+        enum: [
+            'fieldscan_primary',
+            'fieldscan_backup',
+            'gemini_primary',
+            'gemini_backup',
+            'hdm',
+            'primary',
+            'backup',
+            'gemini',
+        ],
+        default: 'gemini_primary',
+    },
 });
 
 const fieldScanSchema = new mongoose.Schema({
@@ -23,7 +40,7 @@ const fieldScanSchema = new mongoose.Schema({
     farm: { type: mongoose.Schema.Types.ObjectId, ref: 'Farm', required: true },
     field: { type: mongoose.Schema.Types.ObjectId, ref: 'Field', required: true },
     cropType: { type: String, required: true },
-    
+
     // Stats
     totalFrames: { type: Number, default: 0 },
     preFilteredFrames: { type: Number, default: 0 },
@@ -32,7 +49,7 @@ const fieldScanSchema = new mongoose.Schema({
     geminiRequests: { type: Number, default: 0 },
     batchSize: { type: Number, default: 16 },
     duration: { type: Number, default: 0 }, // seconds
-    
+
     // Skip reasons
     skipReasons: {
         blurry: { type: Number, default: 0 },
@@ -42,10 +59,10 @@ const fieldScanSchema = new mongoose.Schema({
         invalid: { type: Number, default: 0 },
         download_failed: { type: Number, default: 0 },
     },
-    
+
     // Photos + results
     photos: [fieldScanPhotoSchema],
-    
+
     // Summary
     summary: {
         healthyCount: { type: Number, default: 0 },
@@ -72,24 +89,46 @@ const fieldScanSchema = new mongoose.Schema({
             affectedAreas: { type: Number, default: 0 },
         },
     },
-    
+
     // Key usage
     keyUsage: {
         fieldscan_primary: { type: Number, default: 0 },
         fieldscan_backup: { type: Number, default: 0 },
+        gemini_primary: { type: Number, default: 0 },
+        gemini_backup: { type: Number, default: 0 },
+        hdm: { type: Number, default: 0 },
     },
-    
+
     // Status
     status: { type: String, enum: ['processing', 'completed', 'failed'], default: 'processing' },
     errorMessage: { type: String, default: '' },
-    
+
     // Email
     emailSent: { type: Boolean, default: false },
-    
+
 }, { timestamps: true });
 
 fieldScanSchema.index({ user: 1, createdAt: -1 });
 fieldScanSchema.index({ field: 1, createdAt: -1 });
 fieldScanSchema.index({ farm: 1, createdAt: -1 });
+
+// Normalize casing and unknown values before validation.
+// HDM sometimes returns capitalized severity ('Moderate'); Gemini returns lowercase.
+fieldScanSchema.pre('save', function (next) {
+    if (Array.isArray(this.photos)) {
+        for (const p of this.photos) {
+            if (p?.analysis?.severity && typeof p.analysis.severity === 'string') {
+                const s = p.analysis.severity.toLowerCase();
+                p.analysis.severity = ['low', 'moderate', 'high', 'none', 'uncertain'].includes(s)
+                    ? s
+                    : 'uncertain';
+            }
+            if (p?.keyUsed && typeof p.keyUsed === 'string') {
+                p.keyUsed = p.keyUsed.toLowerCase();
+            }
+        }
+    }
+    next();
+});
 
 module.exports = mongoose.model('FieldScan', fieldScanSchema);
