@@ -1,15 +1,15 @@
 /**
  * Single source of truth for classifying AI-returned disease strings.
  *
- * Mirrors api/utils/disease_classifier.py — same rules, same categories.
- * Every AI provider (Gemini, HDM, future) may return slightly different
- * strings; this normalizes them so downstream code never string-matches.
+ * Mirrors api/utils/disease_classifier.py and the client classifier —
+ * same rules, same precedence. Update all 3 in lockstep.
  *
- * Categories:
- *   healthy       - AI saw a plant, found no disease
- *   inconclusive  - AI saw a plant but couldn't commit
- *   no_crop       - AI saw no plant / non-crop image
- *   disease       - AI identified a specific disease
+ * Precedence (first match wins):
+ *   1. NO_CROP patterns          ("no plant detected")
+ *   2. DISEASE keywords          (beats "no clear" hedging)
+ *   3. HEALTHY patterns          (includes hedged healthy phrasings)
+ *   4. INCONCLUSIVE patterns     (uncertain / unclear / etc.)
+ *   5. Default → INCONCLUSIVE    (unknown string never auto-disease)
  */
 
 const CATEGORIES = Object.freeze({
@@ -19,48 +19,39 @@ const CATEGORIES = Object.freeze({
     DISEASE: 'disease',
 });
 
-// Order matters: most specific first.
 const NO_CROP_PATTERNS = [
-    'no plant detected',
-    'no plant',
-    'no crop detected',
-    'no crop',
-    'non-crop',
-    'non crop',
-    'not a plant',
-    'no vegetation',
-    'n/a (non-crop image)',
+    'no plant detected', 'no plant',
+    'no crop detected', 'no crop',
+    'non-crop', 'non crop', 'not a plant',
+    'no vegetation', 'n/a (non-crop image)',
 ];
 
-const INCONCLUSIVE_PATTERNS = [
-    'uncertain',
-    'unclear',
-    'unknown',
-    'no clear',
-    'inconclusive',
-    'pending',
-    'analysis failed',
-    'n/a',
-    'none',
+const DISEASE_KEYWORDS = [
+    'blight', 'rust', 'spot', 'rot', 'wilt', 'mildew', 'mosaic',
+    'virus', 'bacter', 'fung', 'mold', 'mould',
+    'leaf miner', 'aphid', 'thrip', 'weevil', 'borer',
+    'caterpillar', 'worm', 'beetle', 'mite', 'nematode',
+    'deficiency', 'chlorosis', 'necrosis',
+    'canker', 'galling', 'gummosis', 'scab', 'smut', 'anthracnose',
 ];
 
 const HEALTHY_PATTERNS = [
-    'healthy',
-    'no disease',
-    'no issues',
-    'no symptoms',
-    'clean',
+    'healthy', 'no disease', 'no issues', 'no symptoms', 'clean',
+    'no clear disease', 'no clear symptoms', 'no obvious signs',
+    'no definitive pathology', 'no visible disease', 'no visible symptoms',
+    'no sign of disease', 'no pathology',
+    'appears healthy', 'looks healthy', 'appears normal', 'looks normal',
+];
+
+const INCONCLUSIVE_PATTERNS = [
+    'uncertain', 'unclear', 'unknown', 'no clear', 'inconclusive',
+    'pending', 'analysis failed', 'n/a', 'none',
 ];
 
 function _containsAny(text, patterns) {
     return patterns.some((p) => text.includes(p));
 }
 
-/**
- * Classify an AI-returned disease string.
- * @param {string|null|undefined} raw
- * @returns {{ category: string, value: string, raw: string }}
- */
 function classifyDisease(raw) {
     if (raw == null) {
         return { category: CATEGORIES.INCONCLUSIVE, value: 'Uncertain', raw: '' };
@@ -71,23 +62,23 @@ function classifyDisease(raw) {
     }
     const lower = trimmed.toLowerCase();
 
-    // 1. No-crop first — must beat the generic "disease" fallback.
     if (_containsAny(lower, NO_CROP_PATTERNS)) {
         return { category: CATEGORIES.NO_CROP, value: 'No crop detected', raw: trimmed };
     }
 
-    // 2. Healthy — before inconclusive so "healthy, no disease" stays green.
+    if (_containsAny(lower, DISEASE_KEYWORDS)) {
+        return { category: CATEGORIES.DISEASE, value: trimmed, raw: trimmed };
+    }
+
     if (HEALTHY_PATTERNS.some((p) => lower === p || lower.includes(p))) {
         return { category: CATEGORIES.HEALTHY, value: 'Healthy', raw: trimmed };
     }
 
-    // 3. Inconclusive.
     if (_containsAny(lower, INCONCLUSIVE_PATTERNS)) {
         return { category: CATEGORIES.INCONCLUSIVE, value: 'Uncertain', raw: trimmed };
     }
 
-    // 4. Anything else is a real disease name.
-    return { category: CATEGORIES.DISEASE, value: trimmed, raw: trimmed };
+    return { category: CATEGORIES.INCONCLUSIVE, value: 'Uncertain', raw: trimmed };
 }
 
 function isRealDisease(raw) {
