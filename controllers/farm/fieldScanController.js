@@ -9,26 +9,8 @@ const alertService = require('../../services/alertService');
 const User = require('../../models/farm/User');
 const { successResponse, errorResponse } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
+const { isRealDisease } = require('../../utils/diseaseClassifier');
 const logger = require('../../utils/logger');
-
-// Disease values that are NOT real findings — never create alerts for these.
-const IGNORE_DISEASES = [
-    'no plant detected',
-    'no crop detected',
-    'n/a (non-crop image)',
-    'n/a',
-    'none',
-    'unknown',
-    'uncertain',
-    'unclear',
-    'healthy',
-];
-
-function isRealDisease(name) {
-    if (!name) return false;
-    const lower = String(name).trim().toLowerCase();
-    return !IGNORE_DISEASES.includes(lower);
-}
 
 function isHttpUrl(value) {
     if (!value || typeof value !== 'string') return false;
@@ -61,61 +43,27 @@ function dominantKeyLabel(keyUsage = {}) {
 const checkFieldScanAccess = async (userId, fieldId) => {
     const settings = await Settings.findOne();
     const fieldScanSettings = settings?.fieldScan || {};
-
     if (!fieldScanSettings.enabled) {
         return { allowed: false, reason: 'Field scan is currently disabled' };
     }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const farmerDaily = await Usage.countDocuments({
-        user: userId,
-        endpoint: 'field_scan',
-        requestTimestamp: { $gte: today },
-    });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const farmerDaily = await Usage.countDocuments({ user: userId, endpoint: 'field_scan', requestTimestamp: { $gte: today } });
     const farmerDailyLimit = fieldScanSettings.farmerLimits?.daily || 10;
-    if (farmerDaily >= farmerDailyLimit) {
-        return { allowed: false, reason: `Daily field scan limit reached (${farmerDaily}/${farmerDailyLimit})` };
-    }
+    if (farmerDaily >= farmerDailyLimit) return { allowed: false, reason: `Daily field scan limit reached (${farmerDaily}/${farmerDailyLimit})` };
 
-    const fieldDaily = await Usage.countDocuments({
-        farm: fieldId,
-        endpoint: 'field_scan',
-        requestTimestamp: { $gte: today },
-    });
+    const fieldDaily = await Usage.countDocuments({ farm: fieldId, endpoint: 'field_scan', requestTimestamp: { $gte: today } });
     const fieldDailyLimit = fieldScanSettings.fieldLimits?.daily || 10;
-    if (fieldDaily >= fieldDailyLimit) {
-        return { allowed: false, reason: `Field daily scan limit reached (${fieldDaily}/${fieldDailyLimit})` };
-    }
+    if (fieldDaily >= fieldDailyLimit) return { allowed: false, reason: `Field daily scan limit reached (${fieldDaily}/${fieldDailyLimit})` };
 
-    const weekStart = new Date();
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-
-    const farmerWeekly = await Usage.countDocuments({
-        user: userId,
-        endpoint: 'field_scan',
-        requestTimestamp: { $gte: weekStart },
-    });
+    const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0, 0, 0, 0);
+    const farmerWeekly = await Usage.countDocuments({ user: userId, endpoint: 'field_scan', requestTimestamp: { $gte: weekStart } });
     const farmerWeeklyLimit = fieldScanSettings.farmerLimits?.weekly || 50;
-    if (farmerWeekly >= farmerWeeklyLimit) {
-        return { allowed: false, reason: `Weekly field scan limit reached (${farmerWeekly}/${farmerWeeklyLimit})` };
-    }
+    if (farmerWeekly >= farmerWeeklyLimit) return { allowed: false, reason: `Weekly field scan limit reached (${farmerWeekly}/${farmerWeeklyLimit})` };
 
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    const farmerMonthly = await Usage.countDocuments({
-        user: userId,
-        endpoint: 'field_scan',
-        requestTimestamp: { $gte: monthStart },
-    });
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const farmerMonthly = await Usage.countDocuments({ user: userId, endpoint: 'field_scan', requestTimestamp: { $gte: monthStart } });
     const farmerMonthlyLimit = fieldScanSettings.farmerLimits?.monthly || 200;
-    if (farmerMonthly >= farmerMonthlyLimit) {
-        return { allowed: false, reason: `Monthly field scan limit reached (${farmerMonthly}/${farmerMonthlyLimit})` };
-    }
+    if (farmerMonthly >= farmerMonthlyLimit) return { allowed: false, reason: `Monthly field scan limit reached (${farmerMonthly}/${farmerMonthlyLimit})` };
 
     return { allowed: true };
 };
@@ -131,13 +79,9 @@ const startFieldScan = asyncHandler(async (req, res) => {
     if (!access.allowed) return errorResponse(res, access.reason, 429);
 
     const farmId = field.farm;
-
     const scan = await FieldScan.create({
-        user: req.user.id,
-        farm: farmId,
-        field: fieldId,
-        cropType: req.body.cropType || '',
-        status: 'processing',
+        user: req.user.id, farm: farmId, field: fieldId,
+        cropType: req.body.cropType || '', status: 'processing',
     });
 
     await limitService.logUsage(req.user.id, 'field_scan', true, 0, farmId, 'gemini_primary', { scanStatus: 'started', scanId: scan._id });
@@ -154,15 +98,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
 
     const frameUrls = (frames || []).map((f) => f?.imageUrl);
     const invalidUrls = frameUrls.filter((u) => !isHttpUrl(u));
-
     logger.info(`[FieldScan:controller] user=${req.user.id} field=${fieldId} crop=${cropType} frames=${frames.length} invalidUrls=${invalidUrls.length}`);
-
-    if (invalidUrls.length > 0) {
-        invalidUrls.slice(0, 10).forEach((u, i) => {
-            const short = typeof u === 'string' ? u.slice(0, 140) : String(u);
-            logger.warn(`[FieldScan:controller] badUrl[${i}]=${short}`);
-        });
-    }
 
     const field = await Field.findById(fieldId);
     if (!field) return errorResponse(res, 'Field not found', 404);
@@ -170,28 +106,20 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     const farmId = field.farm;
     const settings = await Settings.findOne();
     const maxPhotos = settings?.fieldScan?.maxPhotosPerScan || 100;
-    if (frames.length > maxPhotos) {
-        return errorResponse(res, `Maximum ${maxPhotos} photos per scan`, 400);
-    }
+    if (frames.length > maxPhotos) return errorResponse(res, `Maximum ${maxPhotos} photos per scan`, 400);
 
     const access = await checkFieldScanAccess(req.user.id, fieldId);
     if (!access.allowed) return errorResponse(res, access.reason, 429);
 
     const scan = await FieldScan.create({
-        user: req.user.id,
-        farm: farmId,
-        field: fieldId,
-        cropType,
-        totalFrames: frames.length,
-        status: 'processing',
+        user: req.user.id, farm: farmId, field: fieldId,
+        cropType, totalFrames: frames.length, status: 'processing',
     });
 
     let aiResult;
     try {
         aiResult = await fieldScanService.analyzeFieldScan(
-            frames,
-            cropType,
-            fieldId,
+            frames, cropType, fieldId,
             maxGeminiCalls || settings?.fieldScan?.maxGeminiCallsPerScan || 30,
             preFilterEnabled ?? settings?.fieldScan?.preFilterEnabled ?? true,
             preFilterPercentage || settings?.fieldScan?.preFilterPercentage || 60
@@ -230,33 +158,17 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     scan.keyUsage = keyUsage;
     await scan.save();
 
-    // ---- Alert creation — SKIP non-findings ----
+    // ---- Alerts — gated by shared classifier ----
     if (scan.summary?.diseases?.length > 0) {
         try {
-            const severityMap = {
-                low: 'low',
-                moderate: 'medium',
-                medium: 'medium',
-                high: 'high',
-                critical: 'critical',
-                none: 'low',
-                uncertain: 'low',
-            };
-            const severityOrder = {
-                low: 0, none: 0, uncertain: 0,
-                moderate: 1, medium: 1,
-                high: 2,
-                critical: 3,
-            };
+            const severityMap = { low: 'low', moderate: 'medium', medium: 'medium', high: 'high', critical: 'critical', none: 'low', uncertain: 'low' };
+            const severityOrder = { low: 0, none: 0, uncertain: 0, moderate: 1, medium: 1, high: 2, critical: 3 };
 
-            // Filter out non-findings BEFORE grouping
             const realDiseases = scan.summary.diseases.filter((d) => isRealDisease(d.name));
-
             const uniqueDiseases = [...new Set(realDiseases.map((d) => d.name))];
 
             for (const diseaseName of uniqueDiseases) {
                 const diseaseInstances = realDiseases.filter((d) => d.name === diseaseName);
-
                 const highestSeverity = diseaseInstances.reduce((max, d) => {
                     const cur = severityOrder[d.severity] ?? 0;
                     const best = severityOrder[max] ?? 0;
@@ -264,18 +176,13 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
                 }, 'low');
 
                 await alertService.createAlert({
-                    farm: farmId,
-                    field: fieldId,
-                    type: 'disease_detected',
+                    farm: farmId, field: fieldId, type: 'disease_detected',
                     severity: severityMap[highestSeverity] || 'medium',
                     message: `${diseaseName} detected in field scan (${diseaseInstances.length} photos affected)`,
                     recommendation: diseaseInstances[0]?.recommendation || 'Inspect affected areas and apply appropriate treatment.',
                     data: {
-                        disease: diseaseName,
-                        count: diseaseInstances.length,
-                        cropType,
-                        scanId: scan._id,
-                        locations: diseaseInstances.map((d) => d.location),
+                        disease: diseaseName, count: diseaseInstances.length, cropType,
+                        scanId: scan._id, locations: diseaseInstances.map((d) => d.location),
                     },
                 });
             }
@@ -283,7 +190,7 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
             if (uniqueDiseases.length > 0) {
                 logger.info(`[Field Scan] Created ${uniqueDiseases.length} disease alerts for scan ${scan._id}`);
             } else {
-                logger.info(`[Field Scan] No real diseases found in scan ${scan._id} — no alerts created`);
+                logger.info(`[Field Scan] No real diseases in scan ${scan._id} — alerts suppressed`);
             }
         } catch (alertError) {
             logger.error(`[Field Scan] Alert creation failed: ${alertError.message}`);
@@ -291,56 +198,31 @@ const analyzeFieldScan = asyncHandler(async (req, res) => {
     }
 
     const metadata = {
-        scanId: scan._id,
-        totalFrames: scan.totalFrames,
-        preFilteredFrames: scan.preFilteredFrames,
-        skippedFrames: scan.skippedFrames,
-        geminiRequests: scan.geminiRequests,
-        batchSize: scan.batchSize,
-        duration: scan.duration,
-        skipReasons: scan.skipReasons,
+        scanId: scan._id, totalFrames: scan.totalFrames, preFilteredFrames: scan.preFilteredFrames,
+        skippedFrames: scan.skippedFrames, geminiRequests: scan.geminiRequests, batchSize: scan.batchSize,
+        duration: scan.duration, skipReasons: scan.skipReasons,
     };
 
-    await limitService.logUsage(
-        req.user.id,
-        'field_scan',
-        true,
-        analyzedFrames,
-        farmId,
-        dominantKeyLabel(keyUsage),
-        metadata
-    );
+    await limitService.logUsage(req.user.id, 'field_scan', true, analyzedFrames, farmId, dominantKeyLabel(keyUsage), metadata);
 
     try {
         const emailToggles = settings?.emailToggles || {};
         if (emailToggles.farmerFieldScanResults !== false) {
             const user = await User.findById(req.user.id);
             const summary = scan.summary || {};
-            await emailService.send(
-                user.email,
-                'farmerFieldScanResults',
-                {
-                    user: { name: user.name, email: user.email },
-                    fieldName: field.name,
-                    cropType,
-                    scanDate: new Date(),
-                    duration: scan.duration ? `${scan.duration}s` : null,
-                    totalPhotos: scan.totalFrames,
-                    analyzedPhotos: scan.analyzedFrames,
-                    coverage: null,
-                    healthyCount: summary.healthyCount || 0,
-                    healthyPercentage: summary.healthyPercentage || 0,
-                    diseaseCount: summary.diseaseCount || 0,
-                    diseases: (summary.diseases || []).filter((d) => isRealDisease(d.name)),
-                    weeds: summary.weeds || { pressure: 'None', hotspots: [] },
-                    pests: summary.pests || { activity: 'None', affectedAreas: 0 },
-                    recommendations: (scan.photos || [])
-                        .filter((p) => p.analysis?.recommendation)
-                        .map((p) => p.analysis.recommendation)
-                        .slice(0, 5) || [],
-                    scanId: scan._id,
-                }
-            );
+            await emailService.send(user.email, 'farmerFieldScanResults', {
+                user: { name: user.name, email: user.email },
+                fieldName: field.name, cropType, scanDate: new Date(),
+                duration: scan.duration ? `${scan.duration}s` : null,
+                totalPhotos: scan.totalFrames, analyzedPhotos: scan.analyzedFrames, coverage: null,
+                healthyCount: summary.healthyCount || 0, healthyPercentage: summary.healthyPercentage || 0,
+                diseaseCount: summary.diseaseCount || 0,
+                diseases: (summary.diseases || []).filter((d) => isRealDisease(d.name)),
+                weeds: summary.weeds || { pressure: 'None', hotspots: [] },
+                pests: summary.pests || { activity: 'None', affectedAreas: 0 },
+                recommendations: (scan.photos || []).filter((p) => p.analysis?.recommendation).map((p) => p.analysis.recommendation).slice(0, 5),
+                scanId: scan._id,
+            });
             scan.emailSent = true;
             await scan.save();
         }
@@ -372,28 +254,21 @@ const getFieldScanSettings = asyncHandler(async (req, res) => {
 
 const getMyFieldScans = asyncHandler(async (req, res) => {
     const scans = await FieldScan.find({ user: req.user.id })
-        .populate('field', 'name')
-        .populate('farm', 'name')
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
+        .populate('field', 'name').populate('farm', 'name')
+        .sort({ createdAt: -1 }).limit(50).lean();
     return successResponse(res, { scans });
 });
 
 const getFieldScanById = asyncHandler(async (req, res) => {
     const scan = await FieldScan.findOne({ _id: req.params.id, user: req.user.id })
-        .populate('field', 'name')
-        .populate('farm', 'name')
-        .lean();
+        .populate('field', 'name').populate('farm', 'name').lean();
     if (!scan) return errorResponse(res, 'Scan not found', 404);
     return successResponse(res, { scan });
 });
 
 const getFieldScansByField = asyncHandler(async (req, res) => {
     const scans = await FieldScan.find({ field: req.params.fieldId, user: req.user.id })
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
+        .sort({ createdAt: -1 }).limit(50).lean();
     return successResponse(res, { scans });
 });
 
@@ -404,11 +279,6 @@ const deleteFieldScan = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    startFieldScan,
-    analyzeFieldScan,
-    getFieldScanSettings,
-    getMyFieldScans,
-    getFieldScanById,
-    getFieldScansByField,
-    deleteFieldScan,
+    startFieldScan, analyzeFieldScan, getFieldScanSettings,
+    getMyFieldScans, getFieldScanById, getFieldScansByField, deleteFieldScan,
 };

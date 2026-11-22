@@ -4,6 +4,7 @@ const Field = require('../models/farm/Field');
 const aiService = require('./aiService');
 const alertService = require('./alertService');
 const { uploadFile } = require('../config/cloudinary');
+const { classifyDisease, CATEGORIES } = require('../utils/diseaseClassifier');
 const logger = require('../utils/logger');
 
 const ALLOWED_SEVERITY = ['low', 'moderate', 'high', 'uncertain', 'none'];
@@ -63,15 +64,21 @@ class ImageService {
             if (aiResult && aiResult.success && aiResult.data) {
                 const analysis = aiResult.data.image_analysis || aiResult.data;
 
-                cropImage.diseaseDetected = safeString(analysis.disease, 'Unknown');
+                // ---- Classify disease via shared classifier ----
+                const classification = classifyDisease(analysis.disease);
+                cropImage.diseaseDetected = classification.value;
+                cropImage.diseaseCategory = classification.category;
+
                 cropImage.confidence = typeof analysis.confidence === 'number' ? analysis.confidence : null;
                 cropImage.severity = normalizeSeverity(analysis.severity);
-                cropImage.symptoms = safeString(analysis.symptoms, '');
+                cropImage.symptoms = safeString(
+                    analysis.symptoms || (classification.category !== CATEGORIES.DISEASE ? classification.raw : ''),
+                    ''
+                );
                 cropImage.recommendation = safeString(analysis.recommendation, '');
                 cropImage.healthScore = typeof aiResult.data.health_score === 'number' ? aiResult.data.health_score : null;
 
-                // Read provider from FastAPI's response rather than a static env var.
-                // FastAPI returns image_analysis.keyUsed ('gemini' | 'hdm').
+                // Provider from FastAPI's response (was process.env.AI_USED before)
                 const providerRaw = analysis.keyUsed || analysis.model || '';
                 cropImage.aiUsed = safeString(providerRaw, 'unknown');
 
@@ -79,17 +86,17 @@ class ImageService {
                 cropImage.analysisTimestamp = new Date();
                 await cropImage.save();
 
-                const diseaseName = cropImage.diseaseDetected;
-                if (diseaseName && diseaseName !== 'Healthy' && diseaseName !== 'Unknown') {
+                // ---- Alerts ONLY for real diseases ----
+                if (classification.category === CATEGORIES.DISEASE) {
                     await alertService.createAlert({
                         farm: farmId,
                         field: fieldId,
                         type: 'disease_detected',
                         severity: normalizeAlertSeverity(analysis.severity),
-                        message: `${diseaseName} detected on ${cropType}`,
+                        message: `${classification.value} detected on ${cropType}`,
                         recommendation: cropImage.recommendation,
                         data: {
-                            disease: diseaseName,
+                            disease: classification.value,
                             confidence: cropImage.confidence,
                             severity: cropImage.severity,
                             cropType,
@@ -97,11 +104,16 @@ class ImageService {
                             provider: cropImage.aiUsed,
                         },
                     });
+                } else {
+                    logger.info(
+                        `[ImageService] No alert for image ${cropImage._id} — category=${classification.category}`
+                    );
                 }
             } else {
                 cropImage.status = 'failed';
                 cropImage.severity = 'uncertain';
                 cropImage.diseaseDetected = 'Analysis failed';
+                cropImage.diseaseCategory = CATEGORIES.INCONCLUSIVE;
                 cropImage.recommendation = 'AI did not return a result. Please retry the scan.';
                 await cropImage.save();
                 logger.warn(`Image analysis returned no data for ${cropImage._id}`);
@@ -110,6 +122,7 @@ class ImageService {
             cropImage.status = 'failed';
             cropImage.severity = 'uncertain';
             cropImage.diseaseDetected = 'Analysis failed';
+            cropImage.diseaseCategory = CATEGORIES.INCONCLUSIVE;
             cropImage.recommendation = 'AI call failed. Please retry the scan.';
             await cropImage.save();
             logger.error(`Image analysis failed: ${error.message}`);

@@ -11,25 +11,8 @@ const CropImage = require('../models/farm/CropImage');
 const FieldScan = require('../models/farm/FieldScan');
 const weatherService = require('./weatherService');
 const Settings = require('../models/admin/Settings');
+const { classifyDisease, isRealDisease, CATEGORIES } = require('../utils/diseaseClassifier');
 const logger = require('../utils/logger');
-
-// Disease values that are NOT real findings — don't feed these into the AI context.
-const IGNORE_DISEASES = [
-    'no plant detected',
-    'no crop detected',
-    'n/a (non-crop image)',
-    'n/a',
-    'none',
-    'unknown',
-    'uncertain',
-    'unclear',
-];
-
-function isRealDisease(name) {
-    if (!name) return false;
-    const lower = String(name).trim().toLowerCase();
-    return !IGNORE_DISEASES.includes(lower);
-}
 
 function formatDate(d) {
     if (!d) return '?';
@@ -88,27 +71,20 @@ class AIContextService {
         today.setHours(0, 0, 0, 0);
 
         const [
-            fields,
-            animals,
-            todayProd,
-            stock,
-            alerts,
-            physicalDevices,
-            virtualDevices,
-            weather,
+            fields, animals, todayProd, stock, alerts,
+            physicalDevices, virtualDevices, weather,
         ] = await Promise.all([
             Field.find({ farm: farmId, status: 'active' }).lean(),
             Animal.find({ farm: farmId, status: 'active' }).lean(),
             ProductionRecord.find({ farm: farmId, date: { $gte: today } }).lean(),
             Stock.find({ farm: farmId }).lean(),
-            // All unread alerts — not just high/critical
             Alert.find({ farm: farmId, isRead: false }).sort({ createdAt: -1 }).limit(15).lean(),
             Device.find({ farm: farmId }).lean(),
             VirtualDevice.find({ farm: farmId }).lean(),
             weatherService.getFarmWeather(farmId).catch(() => null),
         ]);
 
-        // ---- Sensor readings: latest per field ----
+        // Sensor readings per field
         const fieldIds = fields.map((f) => f._id);
         let sensorByField = {};
         if (fieldIds.length > 0) {
@@ -116,26 +92,17 @@ class AIContextService {
                 const readings = await SensorReading.aggregate([
                     { $match: { field: { $in: fieldIds } } },
                     { $sort: { timestamp: -1 } },
-                    {
-                        $group: {
-                            _id: '$field',
-                            latest: { $first: '$$ROOT' },
-                        },
-                    },
+                    { $group: { _id: '$field', latest: { $first: '$$ROOT' } } },
                 ]);
-                for (const r of readings) {
-                    sensorByField[String(r._id)] = r.latest;
-                }
+                for (const r of readings) sensorByField[String(r._id)] = r.latest;
             } catch (err) {
                 logger.warn(`Sensor aggregation failed for farm ${farmId}: ${err.message}`);
             }
         }
 
-        // ---- Recent field scans (last 7, filtered to real findings only) ----
+        // Recent field scans — filter to real findings only
         const rawFieldScans = await FieldScan.find({ farm: farmId })
-            .sort({ createdAt: -1 })
-            .limit(7)
-            .lean();
+            .sort({ createdAt: -1 }).limit(7).lean();
 
         const fieldScans = rawFieldScans
             .map((s) => {
@@ -154,27 +121,27 @@ class AIContextService {
             })
             .filter((s) => s.realDiseases.length > 0 || s.healthyCount > 0 || s.hadNoPlantOrCrop);
 
-        // ---- Recent crop scans (last 5, only completed with real disease or healthy) ----
+        // Recent crop scans — only completed with real disease or healthy
         const rawCropScans = await CropImage.find({ farm: farmId })
-            .sort({ createdAt: -1 })
-            .limit(10)
-            .lean();
+            .sort({ createdAt: -1 }).limit(10).lean();
 
         const cropScans = rawCropScans
             .filter((c) => (c.status || '').toLowerCase() === 'completed')
-            .map((c) => ({
-                date: c.createdAt,
-                cropType: c.cropType,
-                disease: c.diseaseDetected,
-                confidence: c.confidence,
-                severity: c.severity,
-                isRealFinding: isRealDisease(c.diseaseDetected)
-                    || String(c.diseaseDetected || '').toLowerCase() === 'healthy',
-            }))
-            .filter((c) => c.isRealFinding)
+            .map((c) => {
+                // Prefer stored category; fall back to classifier (for legacy rows)
+                const category = c.diseaseCategory || classifyDisease(c.diseaseDetected).category;
+                return {
+                    date: c.createdAt,
+                    cropType: c.cropType,
+                    disease: c.diseaseDetected,
+                    category,
+                    confidence: c.confidence,
+                    severity: c.severity,
+                };
+            })
+            .filter((c) => c.category === CATEGORIES.DISEASE || c.category === CATEGORIES.HEALTHY)
             .slice(0, 5);
 
-        // ---- Animals ----
         const animalByType = {};
         animals.forEach((a) => {
             if (a.isBatch) animalByType[a.type] = (animalByType[a.type] || 0) + (a.batchCurrent || 0);
@@ -192,32 +159,19 @@ class AIContextService {
                 if (a.type !== 'disease_detected') return true;
                 const msg = String(a.message || '');
                 const m = msg.match(/^(\S+(?:\s\S+)?)\s+detected/i);
-                if (m && IGNORE_DISEASES.includes(m[1].trim().toLowerCase())) return false;
+                if (m && !isRealDisease(m[1].trim())) return false;
                 return true;
             })
             .map((a) => `[${a.severity.toUpperCase()}] ${a.message}`);
 
-        // ---- Devices ----
         const allDevices = [
-            ...physicalDevices.map((d) => ({
-                name: d.deviceId,
-                type: 'physical',
-                zone: d.zone || 'field',
-                status: d.status,
-            })),
-            ...virtualDevices.map((v) => ({
-                name: v.name || 'FarmVexa Virtual',
-                type: 'virtual',
-                zone: v.zone || 'field',
-                status: v.status,
-            })),
+            ...physicalDevices.map((d) => ({ name: d.deviceId, type: 'physical', zone: d.zone || 'field', status: d.status })),
+            ...virtualDevices.map((v) => ({ name: v.name || 'FarmVexa Virtual', type: 'virtual', zone: v.zone || 'field', status: v.status })),
         ];
-
         const onlineDevices = allDevices.filter((d) => d.status === 'online').length;
         const physicalOnline = physicalDevices.filter((d) => d.status === 'online').length;
         const virtualOnline = virtualDevices.filter((v) => v.status === 'online').length;
 
-        // ---- Fields with latest sensor ----
         const fieldsWithSensors = fields.map((f) => {
             const s = sensorByField[String(f._id)];
             return {
@@ -242,23 +196,16 @@ class AIContextService {
                 : 'Unknown',
             size: farm.size?.value ? `${farm.size.value} ${farm.size.unit}` : 'Unknown',
             fields: fieldsWithSensors,
-            animals: {
-                total: animals.length,
-                byType: animalByType,
-            },
+            animals: { total: animals.length, byType: animalByType },
             productionToday: { milk, eggs },
             stock: stockSummary,
             alerts: alertSummary,
             devices: {
-                total: allDevices.length,
-                online: onlineDevices,
-                physical: physicalDevices.length,
-                physicalOnline,
-                virtual: virtualDevices.length,
-                virtualOnline,
+                total: allDevices.length, online: onlineDevices,
+                physical: physicalDevices.length, physicalOnline,
+                virtual: virtualDevices.length, virtualOnline,
             },
-            fieldScans,
-            cropScans,
+            fieldScans, cropScans,
             weather: weather ? {
                 condition: weather.condition,
                 temperature: weather.temperature?.avg?.toFixed(1) || weather.temperature?.max,
@@ -286,7 +233,6 @@ class AIContextService {
                 prompt += `Location: ${farm.location}\n`;
                 prompt += `Size: ${farm.size}\n`;
 
-                // Fields + crops + sensors
                 if (farm.fields && farm.fields.length > 0) {
                     prompt += `Fields:\n`;
                     farm.fields.forEach((f) => {
@@ -295,24 +241,22 @@ class AIContextService {
                         if (f.size) line += ` (${f.size})`;
                         if (f.sensors) {
                             const s = f.sensors;
-                            const sensorBits = [];
-                            if (s.temperature != null) sensorBits.push(`${s.temperature}°C`);
-                            if (s.humidity != null) sensorBits.push(`humidity ${s.humidity}%`);
-                            if (s.soilMoisture != null) sensorBits.push(`soil moisture ${s.soilMoisture}%`);
-                            if (sensorBits.length > 0) line += ` | latest sensors: ${sensorBits.join(', ')}`;
+                            const bits = [];
+                            if (s.temperature != null) bits.push(`${s.temperature}°C`);
+                            if (s.humidity != null) bits.push(`humidity ${s.humidity}%`);
+                            if (s.soilMoisture != null) bits.push(`soil moisture ${s.soilMoisture}%`);
+                            if (bits.length > 0) line += ` | latest sensors: ${bits.join(', ')}`;
                         }
                         prompt += line + `\n`;
                     });
                 }
 
-                // Animals
                 if (Object.keys(farm.animals.byType).length > 0) {
                     prompt += `Animals: `;
                     prompt += Object.entries(farm.animals.byType).map(([type, count]) => `${count} ${type}`).join(', ');
                     prompt += `\n`;
                 }
 
-                // Production
                 if (farm.productionToday.milk > 0 || farm.productionToday.eggs > 0) {
                     prompt += `Production Today: `;
                     const prod = [];
@@ -321,12 +265,10 @@ class AIContextService {
                     prompt += prod.join(', ') + '\n';
                 }
 
-                // Stock
                 if (farm.stock.length > 0) {
                     prompt += `Stock: ${farm.stock.join('; ')}\n`;
                 }
 
-                // Recent field scans — only real findings
                 if (farm.fieldScans && farm.fieldScans.length > 0) {
                     prompt += `Recent Field Scans:\n`;
                     farm.fieldScans.forEach((s) => {
@@ -342,7 +284,6 @@ class AIContextService {
                     });
                 }
 
-                // Recent crop scans — real findings only
                 if (farm.cropScans && farm.cropScans.length > 0) {
                     prompt += `Recent Crop Scans:\n`;
                     farm.cropScans.forEach((c) => {
@@ -351,17 +292,14 @@ class AIContextService {
                     });
                 }
 
-                // Alerts
                 if (farm.alerts.length > 0) {
                     prompt += `Active Alerts: ${farm.alerts.join('; ')}\n`;
                 }
 
-                // Devices summary
                 if (farm.devices.total > 0) {
                     prompt += `Devices: ${farm.devices.online}/${farm.devices.total} online (${farm.devices.physical} physical, ${farm.devices.virtual} virtual)\n`;
                 }
 
-                // Weather
                 if (farm.weather) {
                     const w = farm.weather;
                     const parts = [];
@@ -374,7 +312,6 @@ class AIContextService {
             });
         }
 
-        // ---- Anti-hallucination rules ----
         prompt += `\nCRITICAL RULES:\n`;
         prompt += `1. ONLY use data present in FARM CONTEXT above. Never invent farm names, crops, fields, locations, weather, animals, or diseases.\n`;
         prompt += `2. If asked about something not in the context (e.g. a crop that isn't grown, a county not listed), say "I don't have data on that for your farm" and offer to help set it up.\n`;
